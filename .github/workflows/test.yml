@@ -19,7 +19,8 @@ concurrency:
 jobs:
   test:
     name: Python ${{ matrix.name }}
-    runs-on: ubuntu-latest
+    # Not ubuntu-latest: actions/setup-python has no Python 3.9 build for Ubuntu 26.04 (3.9 is end of life).
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     strategy:
       fail-fast: false
