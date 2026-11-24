@@ -6,6 +6,12 @@
 
 Claude Code のセッション履歴を、メッセージアプリ風の吹き出し表示で 1 ファイルの HTML に書き出す Claude Code 用 skill。
 
+![生成したページ: 目次、モデル・effort・トークン数つきの吹き出し、開いた Edit ツールの呼び出し](docs/images/ja-desktop.png)
+
+<p align="center"><img src="docs/images/ja-phone-dark.png" alt="同じページをスマホ幅・ダークモードで表示したところ" width="320"></p>
+
+画像は架空のデモセッションから作ったもの（`docs/make_screenshots.py` で生成）。
+
 ## できること
 
 - 指定したセッションのやり取りを、時系列順に上から吹き出しで表示する
@@ -14,7 +20,7 @@ Claude Code のセッション履歴を、メッセージアプリ風の吹き�
 - 長いメッセージは折り畳む。折り畳んでいるときは概要（Claude は最後のテキストの冒頭と、使ったツールの集計）を表示する
 - メッセージ単位の目次をサイドバーに表示する。目次の ON/OFF を切り替えられる
 - ワンクリックで HTML をダウンロード、またはクリップボードにコピーできる
-- ツール呼び出し、思考、システム行（コマンド実行・圧縮・モード切り替えなど）は、ページ上で表示を切り替えられる。ファイル自体から除くこともできる（`--no-tools`、`--no-thinking`）
+- ツール呼び出し、思考、システム行（コマンド実行・圧縮・モード切り替えなど）は、ページ上で表示を切り替えられる。ツール呼び出しと思考は、ファイル自体から除くこともできる（`--no-tools`、`--no-thinking`）
 - サブエージェントのやり取りを、呼び出した Agent ツールの中に入れ子で表示する
 - 英語と日本語で出力できる（[言語](#言語)を参照）
 - ダークモードとスマホ幅に対応している
@@ -26,7 +32,7 @@ Claude Code のセッション履歴を、メッセージアプリ風の吹き�
 **生成した HTML には、セッションの内容がそのまま入る。** 会話のほかに、ツールの実行結果、Claude が読んだファイルの中身、思考、コマンドとその出力、作業ディレクトリなどのパス（通常はユーザー名を含む）が含まれる。
 
 - **HTML を公開しないこと**（公開リポジトリ、ブログ、公開 URL など）。共有は信頼できる相手に限り、共有する前に機密情報（認証情報、顧客データ、社内 URL など）が含まれていないか確認すること。
-- **「ツール」「思考」「システム」のボタンは画面上で隠すだけで、コピーとダウンロードには隠した項目も含めてすべてが入る。** ツール呼び出し（とその中のサブエージェントのやり取り）や思考をファイルから除くには、`--no-tools` や `--no-thinking` を付けて生成する。
+- **「ツール」「思考」「システム」のボタンは画面上で隠すだけで、コピーとダウンロードには隠した項目も含めてすべてが入る。** ツール呼び出し（とその中のサブエージェントのやり取り）をファイルから除くには `--no-tools` を、思考（Claude とサブエージェントの分）を除くには `--no-thinking` を付けて生成する。ただし、これらで消えないものもある。会話そのもの、コマンドの出力、フックの出力、IDE の選択範囲、圧縮時の要約はファイルに残る。
 - ファイルは本人だけが読める権限（600）で書き出す。
 - 会話中のリンクはクリックでき、新しいタブで開く。その際、このページのアドレスは送らない（リファラーなし）。
 
@@ -77,13 +83,13 @@ gh skill update
 npx skills add AquaNote12/claude-code-session-viewer --skill claude-code-session-viewer -a claude-code -g
 ```
 
-`-g` を付けないと、今いるプロジェクトの中にだけ入る。
+`-g` を付けないと、今いるプロジェクトの中にだけ入る。リリースを固定するには、取得元を `AquaNote12/claude-code-session-viewer@<タグ>` にする。
 
-更新・削除（ユーザー単位で入れた skill なので、ここでも `-g` を付ける）:
+更新・削除（ユーザー単位で入れた skill なので `-g` / `--global` を付ける。`update -g` はユーザー単位の skill をすべて更新する）:
 
 ```bash
-npx skills update claude-code-session-viewer -g
-npx skills remove claude-code-session-viewer -g
+npx skills update -g
+npx skills remove --global claude-code-session-viewer
 ```
 
 ### 方法 3: 手動で配置
@@ -125,7 +131,7 @@ python3 skills/claude-code-session-viewer/scripts/render_session.py open <生成
 
 - **出力先**: 既定は `~/Downloads/claude-code-sessions/<タイトル>_<セッションIDの先頭8文字>_<言語>.html`。タイトルは 60 文字までに縮め、文字・数字・`_`・`-`・`.` だけを残す。`--out` には、`.html` で終わるパスなら書き出すファイルを、それ以外ならディレクトリ（なければ作る）を指定する。既存のファイルは置き換えるが、出力先のシンボリックリンクはたどらない。
 - **`list`** は 1 つのプロジェクトのセッションを新しい順に表示する（既定 15 件。`--limit` で変更）。対象は `--project` で指定したプロジェクト、なければ `--current-session` で渡したセッションのプロジェクト（skill は現在のセッションを渡す）、それもなければカレントディレクトリ。そのプロジェクトにセッションがなければ、代わりに全プロジェクトを表示する。`--all` を付けると常に全プロジェクトを表示する。
-- **`open`** は生成した HTML ファイルを既定のブラウザで開く（Python の `webbrowser` を使うので、シェルのコマンドは介さない）。
+- **`open`** は生成した HTML ファイルを既定のブラウザで開く（Python の `webbrowser` を使うので、シェルのコマンドは介さない）。このツールで生成したページだけを開く。
 
 ## 言語
 
@@ -190,6 +196,9 @@ claude-code-session-viewer/
 ├── tests/
 │   ├── test_render_session.py
 │   └── fixtures/                        # テスト用の架空のセッション
+├── docs/
+│   ├── make_screenshots.py              # 架空のデモセッションから docs/images/ を作り直す
+│   └── images/                          # この README で使っている画像
 ├── LICENSE
 ├── README.md
 ├── README.ja.md
@@ -209,6 +218,7 @@ python3 -m unittest discover -s tests
 - **文言**: `skills/claude-code-session-viewer/scripts/ccsv/messages/en.py`（正本。表示される場所ごとにまとめ、説明が必要なキーにはコメントを付けてある）と、`skills/claude-code-session-viewer/scripts/ccsv/messages/ja.py` の同じキー。全言語でキーとプレースホルダが一致しているか、英語のページに日本語が残っていないかをテストで確認している。
 - **言語の追加**: `en.py` と同じ場所にファイルを足し、`skills/claude-code-session-viewer/scripts/ccsv/messages/__init__.py` に登録する。あわせて、`skills/claude-code-session-viewer/scripts/ccsv/i18n.py` の OS の言語の判定と、`skills/claude-code-session-viewer/SKILL.md` の言語の決め方も直す（今は日本語と英語だけを前提にしている）。
 - **Claude Code の更新で履歴の形式が変わった**: レコードを読むのは `skills/claude-code-session-viewer/scripts/ccsv/transcript.py`。ツールごとの入力と結果の見せ方（`command` や `old_string` などのフィールド名）は `skills/claude-code-session-viewer/scripts/ccsv/render.py`。
+- **画像**: ページの見た目を変えたら、`python3 docs/make_screenshots.py`（macOS と Google Chrome が必要）で `docs/images/` を作り直す。
 - **ページの見た目と動き**: `skills/claude-code-session-viewer/scripts/ccsv/assets/`（`page.html`・`style.css`・`app.js`）。普通の HTML・CSS・JavaScript として編集できる。`app.js` は必要な値をページ内の JSON から読む。置換用の書式（`{{...}}`）は `page.html` の中でだけ使える。ページの Content-Security-Policy は `app.js` そのもの（生成時にハッシュを計算する）だけに実行を許可するので、インラインのイベントハンドラーや追加のスクリプトは動かない。
 
 ## ライセンス
