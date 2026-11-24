@@ -21,8 +21,19 @@ No external libraries or CDNs are used, so the generated HTML also works offline
 
 ## Requirements
 
+- **macOS** (see [Supported platforms](#supported-platforms))
 - Claude Code (works in both the CLI and the VS Code extension)
 - Python 3.9 or later (the `python3` that ships with macOS is fine; no extra packages)
+
+### Supported platforms
+
+This skill is developed and tested on **macOS only**. Linux and Windows are not supported yet. Known gaps:
+
+- The skill opens the page with the macOS `open` command, so opening it in the browser does not work elsewhere (the HTML file itself is still written).
+- On Windows, the `python3` command may not exist (only `python` or `py`), and printing Japanese file names may fail with Python versions older than 3.15.
+- Detecting the language from the OS works on macOS and Linux, but usually falls back to English on Windows.
+
+The generated HTML page works in any modern browser on any OS.
 
 This skill only works with Claude Code. It reads the session transcripts that Claude Code stores (`~/.claude/projects/`) and relies on Claude Code's own substitutions such as `${CLAUDE_SKILL_DIR}`, so it does not work when installed for other agents such as Cursor or Codex.
 

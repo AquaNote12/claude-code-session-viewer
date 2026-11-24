@@ -23,8 +23,19 @@ Claude Code のセッション履歴を、メッセージアプリ風の吹き�
 
 ## 必要なもの
 
+- **macOS**（[対応 OS](#対応-os) を参照）
 - Claude Code（CLI・VS Code 拡張機能のどちらでも使える）
 - Python 3.9 以上（macOS 標準の `python3` で動く。追加のパッケージは不要）
+
+### 対応 OS
+
+この skill は **macOS でのみ**開発・確認している。Linux と Windows にはまだ対応していない。分かっている問題は次のとおり。
+
+- ページを開くのに macOS の `open` コマンドを使うため、他の OS ではブラウザで開く手順が動かない（HTML ファイル自体は書き出される）
+- Windows では `python3` コマンドがない（`python` や `py` しかない）ことがあり、Python 3.15 より前では日本語のファイル名を表示するときにエラーになることがある
+- OS の設定からの言語判定は macOS と Linux では動くが、Windows ではほぼ英語になる
+
+生成した HTML は、どの OS でも最近のブラウザで見られる。
 
 この skill は Claude Code 専用。Claude Code が保存するセッション履歴（`~/.claude/projects/`）を読み、Claude Code 独自の置換（`${CLAUDE_SKILL_DIR}` など）も使うため、Cursor や Codex など他のエージェントに入れても動かない。
 
