@@ -20,7 +20,8 @@ MESSAGES = {
     "cli_open": "生成した HTML ファイルを既定のブラウザで開く",
     "cli_open_path": "生成した HTML ファイルのパス",
     "err_open": "HTML ファイルが見つかりません: {path}",
-    "err_open_not_generated": "claude-code-session-viewer で生成したページではありません: {path}",
+    "err_open_not_generated": ("このバージョンの claude-code-session-viewer で生成したページではないか、生成後に変更されています: {path}"
+                               "（信頼できるファイルなら、ブラウザで直接開いてください）"),
     "opened": "開きました: {path}",
     "privacy_notice": ("注意: ページには、ツールの実行結果、ファイルの中身、思考が含まれます（ページのボタンで隠せる項目も含みます）。"
                        "共有する前に機密情報が含まれていないか確認し、公開しないでください。"),

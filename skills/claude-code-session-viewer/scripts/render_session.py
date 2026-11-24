@@ -25,7 +25,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from ccsv.i18n import SUPPORTED_LANGS, detect_lang, set_lang, t  # noqa: E402
-from ccsv.render import filter_items, render_page  # noqa: E402
+from ccsv.render import filter_items, is_generated_page, render_page  # noqa: E402
 from ccsv.transcript import (  # noqa: E402
     Builder, SessionLookupError, all_session_files, peek_session, project_dir_name, resolve_session,
 )
@@ -192,8 +192,10 @@ GENERATED_PAGE_MARKER = b'<script id="ccsv-data" type="application/json">'
 
 def cmd_open(args):
     # The browser is started by Python, not by a shell command, so nothing in the path is interpreted.
-    # The skill may run this without asking, so it only opens pages this tool generated: the real file
-    # (after following symbolic links) must be an .html file that carries the page's data block.
+    # The skill may run this without asking, so it only opens pages that this version of the tool generated:
+    # the real file (after following symbolic links) must be an .html file whose head and scripts match the
+    # template exactly, so that its Content-Security-Policy lets nothing but this version's app.js run.
+    # A data-block marker alone is not enough: anyone can write it into a page of their own.
     path = Path(args.path).expanduser()
     try:
         real = path.resolve(strict=True)
@@ -202,7 +204,8 @@ def cmd_open(args):
     if real.suffix.lower() != ".html" or not real.is_file():
         sys.exit(t("err_open", path=args.path))
     try:
-        generated = GENERATED_PAGE_MARKER in real.read_bytes()
+        data = real.read_bytes()
+        generated = GENERATED_PAGE_MARKER in data and is_generated_page(data.decode("utf-8", errors="replace"))
     except OSError:
         generated = False
     if not generated:

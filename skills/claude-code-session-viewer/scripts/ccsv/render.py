@@ -18,7 +18,7 @@ import json
 import re
 from pathlib import Path
 
-from .i18n import get_lang, t
+from .i18n import SUPPORTED_LANGS, get_lang, t
 from .markdown import md_to_html
 from .transcript import add_usage, has_usage, image_src, new_usage, usage_input
 from .util import esc, fmt_num, fmt_ts, one_line, pre, strip_markdown
@@ -58,6 +58,44 @@ def load_template():
     inline = INLINE_SCRIPT_RE.search(page).group(1)
     digest = base64.b64encode(hashlib.sha256(inline.encode("utf-8")).digest()).decode("ascii")
     return page, "sha256-" + digest
+
+
+# Elements that can run code, load, navigate or embed something without a click. <meta http-equiv="refresh">
+# navigates without any script, and the CSP does not restrict navigation. Frames are included because an
+# iframe srcdoc carries a whole document whose tags are entity-encoded, so they would not be found here.
+# Matched by position only (linear time).
+ACTIVE_TAG_RE = re.compile(r"<(script|meta|link|base|i?frame|frameset|object|embed)\b", re.I)
+EXPECTED_ACTIVE_TAGS = ['<script id="ccsv-data" type="application/json">', "<script>"]
+
+
+def is_generated_page(text):
+    """True if text is a page that this version of the tool generated (or the page's own Download / Copy),
+    so that the skill may open it without asking.
+
+    What it checks:
+    - The page starts with exactly this version's head up to and including the Content-Security-Policy.
+      (Windows line endings, and the copy the page itself saves, which drops the newline before <head>,
+      are accepted.)
+    - After that, the only <script>, <meta>, <link>, <base>, frame, <object> or <embed> elements are the data
+      block and the inline app.js. The CSP allows only the hash of this version's app.js, so on such a page
+      nothing else can run, and no meta refresh can send the browser elsewhere.
+    It does not prove that the page is unchanged: added text or plain links are not detected.
+    Pages from other versions (with a different app.js) do not pass; open them in the browser yourself.
+    """
+    text = text.replace("\r\n", "\n")
+    template, script_hash = load_template()
+    head = template[: template.index("<title>")].replace("{{SCRIPT_HASH}}", script_hash)
+    candidates = []
+    for lang in SUPPORTED_LANGS:
+        h = head.replace("{{LANG}}", lang)
+        candidates += [h, h.replace('">\n<head>', '"><head>', 1)]
+    matched = next((h for h in candidates if text.startswith(h)), None)
+    if matched is None:
+        return False
+    found = list(ACTIVE_TAG_RE.finditer(text, len(matched)))
+    if len(found) != len(EXPECTED_ACTIVE_TAGS):
+        return False
+    return all(text.startswith(tag, m.start()) for m, tag in zip(found, EXPECTED_ACTIVE_TAGS))
 
 
 def safe_filename_part(text, limit):

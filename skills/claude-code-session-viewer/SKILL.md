@@ -51,7 +51,7 @@ Script: `${CLAUDE_SKILL_DIR}/scripts/render_session.py`
    ```bash
    python3 "${CLAUDE_SKILL_DIR}/scripts/render_session.py" open '<output path>' --lang <lang>
    ```
-   Do not use other commands (such as `open` or `xdg-open`) to open it.
+   Do not use other commands (such as `open` or `xdg-open`) to open it. If the script refuses to open the file, only pass its message on to the user; do not try to open the file another way.
 
 ## Notes
 
