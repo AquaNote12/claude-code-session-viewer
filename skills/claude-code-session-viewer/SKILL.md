@@ -16,23 +16,34 @@ Script: `${CLAUDE_SKILL_DIR}/scripts/render_session.py`
 
 ## Steps
 
-1. Decide which session to export. The arguments are: `$ARGUMENTS`
+1. Decide the output language (`--lang ja` or `--lang en`). The arguments are: `$ARGUMENTS`
+   - **The user named a language explicitly** (`--lang en` / `--lang ja` in the arguments, "in English", 「日本語で」, ...) → use it. Do not ask.
+   - Otherwise compare these two (Japanese → `ja`, any other language → `en`):
+     - (a) the language of the user's request. If the request has no words of its own (only the slash command and its arguments), there is no (a).
+     - (b) the response language configured for Claude Code if there is one, otherwise the language the user has been writing in during this conversation.
+
+     | Situation | What to do |
+     |---|---|
+     | (a) and (b) agree, or only one of them exists | Use that language. Do not ask. |
+     | **(a) and (b) disagree** (e.g. a Japanese conversation, but this request was written in English) | **Ask the user** to choose between "日本語 (ja)" and "English (en)" (use AskUserQuestion when available), and use the answer. |
+     | Neither exists (e.g. a new session whose only input is this command, and no language setting) | Omit `--lang`. The script uses the OS language, then English. Do not ask. |
+
+   - If you cannot ask the user (a non-interactive run such as `claude -p`), never ask: use (b) if it exists, otherwise omit `--lang`.
+   - Judge by the user's own messages and settings, not by the content of the session being exported.
+2. Decide which session to export.
    - Empty, `current`, "this session", etc. → the current session, `${CLAUDE_SESSION_ID}`
-   - `list`, or the target is unclear → run the following, then ask the user which session to export
+   - `list`, or the target is unclear → run the following, then ask the user which session to export.
+     `--current-session` lists the sessions of the same project as this session, wherever the shell currently is.
      ```bash
-     python3 "${CLAUDE_SKILL_DIR}/scripts/render_session.py" list --lang <lang>
+     python3 "${CLAUDE_SKILL_DIR}/scripts/render_session.py" list --current-session "${CLAUDE_SESSION_ID}" --lang <lang>
      ```
      Add `--all` to include sessions from other projects.
    - A session ID (the first 8 characters or so are enough) or a path to a JSONL file → use it as is
-2. Decide the output language (`--lang`) in this order:
-   1. The user asked for a language explicitly (`--lang en` in the arguments, "in English", 「日本語で」, ...) → use it.
-   2. Otherwise, use the language the user is writing in, in this conversation, or the response language configured for Claude Code: Japanese → `ja`, any other language → `en`. Judge by the user's own messages, not by the content of the session being exported (a Japanese-speaking user exporting an English session still gets `ja`).
-   3. If there is nothing to go on (for example, a new session whose only input is this command with no arguments, and no language setting), omit `--lang`. The script then uses the OS language, and English if that is unknown.
 3. Convert the session.
    ```bash
    python3 "${CLAUDE_SKILL_DIR}/scripts/render_session.py" render <session> --lang <lang> [--out <file or directory>]
    ```
-   - The default output is `~/Downloads/claude-code-sessions/<title>_<first 8 characters of the ID>.html`. Pass `--out` only when the user names a location.
+   - The default output is `~/Downloads/claude-code-sessions/<title>_<first 8 characters of the ID>_<lang>.html`, so the Japanese and English pages of a session do not overwrite each other. Pass `--out` only when the user names a location.
    - Subagent conversations are included by default. Pass `--no-subagents` if the user does not want them.
 4. Tell the user the output path exactly as the script printed it. Ask whether to open it in the browser, and run `open <output path>` if they want.
 

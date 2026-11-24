@@ -6,6 +6,7 @@ MESSAGES = {
     "cli_list": "セッションの一覧を表示する",
     "cli_all": "全プロジェクトのセッションを表示する",
     "cli_project": "このディレクトリのセッションを表示する（既定: カレントディレクトリ）",
+    "cli_current_session": "このセッションと同じプロジェクトのセッションを表示する（--project がない場合に使う）",
     "cli_limit": "表示するセッションの最大数",
     "cli_render": "セッションを HTML に変換する",
     "cli_session": "セッション ID（先頭一致可）または JSONL ファイルのパス",

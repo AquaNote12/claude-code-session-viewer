@@ -2,7 +2,7 @@
 """Convert a Claude Code session transcript (JSONL) into a standalone HTML page.
 
 Usage:
-  render_session.py list [--all] [--limit N] [--project DIR] [--lang ja|en]
+  render_session.py list [--all] [--limit N] [--project DIR] [--current-session SESSION] [--lang ja|en]
   render_session.py render SESSION [--out PATH] [--no-subagents] [--lang ja|en]
 
 SESSION is a session ID (a unique prefix is enough) or a path to a JSONL file.
@@ -31,15 +31,33 @@ from ccsv.util import fmt_num, one_line  # noqa: E402
 DEFAULT_OUT_DIR = Path.home() / "Downloads" / "claude-code-sessions"
 
 
+def list_scope(args):
+    """Which project's sessions to list: (directory name under ~/.claude/projects, text shown to the user).
+
+    Order: --project, then the project of --current-session, then the current directory. The current
+    directory alone is not reliable inside Claude Code, because the shell may have moved elsewhere.
+    """
+    if args.project:
+        return project_dir_name(Path(args.project).expanduser().resolve()), args.project
+    if args.current_session:
+        try:
+            session = resolve_session(args.current_session)
+            return session.parent.name, str(session.parent)
+        except SessionLookupError:
+            pass  # e.g. a brand-new session not written yet; fall back to the current directory
+    cwd = os.getcwd()
+    return project_dir_name(Path(cwd).resolve()), cwd
+
+
 def cmd_list(args):
     files = all_session_files()
     if not args.all:
-        target = project_dir_name(Path(args.project or os.getcwd()).resolve())
+        target, shown = list_scope(args)
         scoped = [f for f in files if f.parent.name == target]
         if scoped:
             files = scoped
         else:
-            print(t("list_fallback", dir=args.project or os.getcwd()))
+            print(t("list_fallback", dir=shown))
     files.sort(key=lambda f: f.stat().st_mtime, reverse=True)
     for f in files[: args.limit]:
         title, first, cwd = peek_session(f)
@@ -78,6 +96,7 @@ def build_parser():
     lp = sub.add_parser("list", help=t("cli_list"))
     lp.add_argument("--all", action="store_true", help=t("cli_all"))
     lp.add_argument("--project", help=t("cli_project"))
+    lp.add_argument("--current-session", metavar="SESSION", help=t("cli_current_session"))
     lp.add_argument("--limit", type=int, default=15, help=t("cli_limit"))
     lp.add_argument("--lang", choices=SUPPORTED_LANGS, help=lang_help)
     rp = sub.add_parser("render", help=t("cli_render"))

@@ -96,21 +96,30 @@ Claude Code の中で次のように呼び出す。
 スクリプトを直接実行することもできる（パスはリポジトリのルートから）。
 
 ```bash
-python3 skills/claude-code-session-viewer/scripts/render_session.py list [--all] [--limit N] [--project DIR] [--lang en|ja]
+python3 skills/claude-code-session-viewer/scripts/render_session.py list [--all] [--limit N] [--project DIR | --current-session SESSION] [--lang en|ja]
 python3 skills/claude-code-session-viewer/scripts/render_session.py render <セッションID | JSONLのパス> [--out PATH] [--no-subagents] [--lang en|ja]
 ```
 
 出力先の既定は `~/Downloads/claude-code-sessions/` 。
 
+`list` は 1 つのプロジェクトのセッションを表示する。対象は `--project` で指定したプロジェクト、なければ `--current-session` で渡したセッションのプロジェクト（skill は現在のセッションを渡す）、それもなければカレントディレクトリ。
+
 ## 言語
 
 HTML の表示（見出し・ボタン・システム行など）とスクリプトのメッセージは、英語と日本語に対応している。会話の中身は、書かれた言語のまま表示する。
 
-言語は次の順で決まる。
+言語は Claude が次のように決める（日本語なら `ja`、それ以外は `en`）。
 
-1. 利用者が明示した言語（`--lang en`、「英語で」、"in English" など）
-2. Claude が判定した利用者の言語（会話や、Claude Code で設定した応答言語から）。日本語なら `ja`、それ以外は `en`
-3. どちらもない場合は、スクリプトが OS の言語設定（`LC_ALL` / `LC_MESSAGES` / `LANG`、macOS ではシステムの言語）を使う。それも分からなければ英語
+| 状況 | 言語 |
+|---|---|
+| 言語を明示した（`--lang en`、「英語で」、"in English" など） | その言語 |
+| 依頼の言語が、Claude Code に設定した応答言語（設定がなければ会話の言語）と一致する | その言語 |
+| 両者が食い違う（ふだんは日本語で書いているが、英語で頼んだ など） | 日本語と英語のどちらにするか、Claude が聞く |
+| 手がかりがない（新しいセッションでコマンドだけを実行し、言語設定もない） | OS の言語設定（`LC_ALL` / `LC_MESSAGES` / `LANG`、macOS ではシステムの言語）。それも分からなければ英語 |
+
+非対話の実行（`claude -p` など）では質問しない。設定された応答言語、それもなければ OS の言語を使う。
+
+出力ファイル名には言語が入る（`..._<セッションID>_<言語>.html`）ので、同じセッションの日本語版と英語版を並べて残せる。
 
 ## 表示するもの・しないもの
 

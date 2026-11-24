@@ -354,7 +354,8 @@ def render_page(builder, items):
             wide.append((t("fact_tokens_by_model"), "<br>".join("%s: %s" % (esc(model), esc(fmt_usage(u)))
                                                                  for model, u in builder.usage_by_model.items())))
         facts_html += "".join('<div class="wide"><dt>%s</dt><dd>%s</dd></div>' % (esc(k), v) for k, v in wide)
-    filename = re.sub(r"[\\/:*?\"<>|\s]+", "_", title).strip("_")[:60] + "_%s.html" % m["session_id"][:8]
+    # The language is part of the name so that the Japanese and English pages of a session do not overwrite each other.
+    filename = re.sub(r"[\\/:*?\"<>|\s]+", "_", title).strip("_")[:60] + "_%s_%s.html" % (m["session_id"][:8], get_lang())
     generated = dt.datetime.now().astimezone().strftime("%Y-%m-%d %H:%M")
     values = {
         "LANG": esc(get_lang()),

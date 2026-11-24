@@ -94,21 +94,30 @@ Asking in plain words, such as "export this session as HTML", also works.
 You can also run the script directly (paths are relative to the repository root):
 
 ```bash
-python3 skills/claude-code-session-viewer/scripts/render_session.py list [--all] [--limit N] [--project DIR] [--lang en|ja]
+python3 skills/claude-code-session-viewer/scripts/render_session.py list [--all] [--limit N] [--project DIR | --current-session SESSION] [--lang en|ja]
 python3 skills/claude-code-session-viewer/scripts/render_session.py render <session ID | path to JSONL> [--out PATH] [--no-subagents] [--lang en|ja]
 ```
 
 The default output directory is `~/Downloads/claude-code-sessions/`.
 
+`list` shows the sessions of one project: the one given with `--project`, otherwise the project of the session given with `--current-session` (the skill passes the current session), otherwise the current directory.
+
 ## Language
 
 The page (labels, buttons, system rows) and the script's messages are available in English and Japanese. The conversation itself is shown in whatever language it was written in.
 
-The language is chosen in this order:
+Claude chooses the language as follows (Japanese gives `ja`; any other language gives `en`):
 
-1. The language the user asked for explicitly (`--lang en`, "in English", 「日本語で」, ...).
-2. The language the user is writing in, judged by Claude (from the conversation, or the response language configured in Claude Code). Japanese gives `ja`; any other language gives `en`.
-3. When neither is available, the script uses the OS language (`LC_ALL` / `LC_MESSAGES` / `LANG`, or the system language on macOS), and English if that is unknown.
+| Situation | Language |
+|---|---|
+| You name a language (`--lang en`, "in English", 「日本語で」, ...) | That language |
+| The language of your request matches the response language configured in Claude Code (or, without a setting, the language of the conversation) | That language |
+| They differ (e.g. you usually write Japanese but asked in English) | Claude asks you to choose between Japanese and English |
+| There is nothing to go on (a new session with only the command, and no language setting) | The OS language (`LC_ALL` / `LC_MESSAGES` / `LANG`, or the system language on macOS), otherwise English |
+
+In non-interactive runs (such as `claude -p`) Claude never asks; it uses the configured response language, then the OS language.
+
+The language is part of the output file name (`..._<session ID>_<lang>.html`), so the Japanese and English pages of a session can sit side by side.
 
 ## What is shown
 

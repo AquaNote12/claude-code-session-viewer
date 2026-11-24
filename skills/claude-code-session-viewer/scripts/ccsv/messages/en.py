@@ -14,6 +14,7 @@ MESSAGES = {
     "cli_list": "list sessions",
     "cli_all": "list sessions from all projects",
     "cli_project": "list sessions of this directory (default: current directory)",
+    "cli_current_session": "list sessions of the same project as this session (used when --project is not given)",
     "cli_limit": "maximum number of sessions to list",
     "cli_render": "convert a session into HTML",
     "cli_session": "session ID (a unique prefix is enough) or path to a JSONL file",

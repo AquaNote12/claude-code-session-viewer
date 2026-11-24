@@ -157,7 +157,7 @@ class RenderTest(ResetLangMixin, unittest.TestCase):
         self.assertNotIn("{{", page)  # every placeholder was filled
         self.assertIn("--bg: #f4f5f7", page)  # style.css was inlined
         self.assertIn('getElementById("ccsv-data")', page)  # app.js was inlined
-        self.assertIn('"filename": "Sample_session_00000000.html"', page)
+        self.assertIn('"filename": "Sample_session_00000000_en.html"', page)
 
     def test_internal_records_are_hidden(self):
         _, page = render_fixture("en")
@@ -207,7 +207,30 @@ class CommandLineTest(ResetLangMixin, unittest.TestCase):
             self.assertIn("Wrote:", en)
             ja = self.run_main("render", str(FIXTURE), "--lang", "ja", "--out", tmp)
             self.assertIn("出力しました:", ja)
-            self.assertEqual(len(list(Path(tmp).glob("*.html"))), 1)
+            # The language is part of the file name, so the two pages do not overwrite each other.
+            self.assertEqual(sorted(p.name for p in Path(tmp).glob("*.html")),
+                             ["Sample_session_00000000_en.html", "Sample_session_00000000_ja.html"])
+
+    def test_list_is_scoped_to_the_current_sessions_project(self):
+        with tempfile.TemporaryDirectory() as projects, tempfile.TemporaryDirectory() as elsewhere:
+            for project, session in (("-work-project-a", "aaaaaaaa-0000"), ("-work-project-b", "bbbbbbbb-0000")):
+                (Path(projects) / project).mkdir()
+                (Path(projects) / project / (session + ".jsonl")).write_text(
+                    '{"type":"ai-title","aiTitle":"title %s"}\n' % session, encoding="utf-8")
+            cwd = os.getcwd()
+            try:
+                os.chdir(elsewhere)  # the shell is not in either project
+                with mock.patch.object(transcript, "PROJECTS_DIR", Path(projects)):
+                    scoped = self.run_main("list", "--current-session", "aaaaaaaa", "--lang", "en")
+                    unscoped = self.run_main("list", "--lang", "en")
+            finally:
+                os.chdir(cwd)
+            self.assertIn("aaaaaaaa-0000", scoped)
+            self.assertNotIn("bbbbbbbb-0000", scoped)
+            self.assertNotIn("No sessions found", scoped)
+            # Without --current-session the current directory decides, which matches no project here.
+            self.assertIn("No sessions found", unscoped)
+            self.assertIn("bbbbbbbb-0000", unscoped)
 
     def test_lang_option_before_the_subcommand(self):
         with tempfile.TemporaryDirectory() as tmp:
