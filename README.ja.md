@@ -199,7 +199,7 @@ claude-code-session-viewer/
 ├── docs/
 │   ├── make_screenshots.py              # 架空のデモセッションから docs/images/ を作り直す
 │   └── images/                          # この README で使っている画像
-├── .github/workflows/test.yml           # テストを実行する（GitHub Actions）
+├── .github/workflows/                   # テストを実行する（GitHub Actions）
 ├── LICENSE
 ├── README.md
 ├── README.ja.md
@@ -215,7 +215,7 @@ skill のディレクトリの中身（`SKILL.md` と `scripts/`）は Agent Ski
 python3 -m unittest discover -s tests
 ```
 
-GitHub Actions（`.github/workflows/test.yml`）が、PR と `main` への push のたびに、macOS の標準の Python 3.9 と最新の Python 3 でテストを実行する。
+GitHub Actions が、PR と `main` への push のたびにテストを実行する。Linux の Python 3.9 と最新の Python 3 で実行するもの（`.github/workflows/test.yml`）が必須のチェックで、macOS の標準の Python 3.9 で実行するもの（`.github/workflows/test-macos.yml`）は参考。macOS のランナーは長時間空かないことがあるため。
 
 セキュリティの問題の報告方法は [SECURITY.md](SECURITY.md) を参照。
 

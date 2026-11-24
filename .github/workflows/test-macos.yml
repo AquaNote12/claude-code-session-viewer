@@ -1,0 +1,34 @@
+name: Tests (macOS system Python)
+
+# For reference only: not a required check. It runs the tests with the python3 that most users have, the
+# Xcode Command Line Tools' Python 3.9 on macOS. macOS runners are sometimes not available for a long time,
+# so a failure or a long wait here must not block merging; the required checks are in test.yml.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: macOS system Python 3.9
+    runs-on: macos-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Run the tests
+        run: |
+          # Fail loudly if the runner image ever stops shipping 3.9, instead of silently testing another version.
+          /usr/bin/python3 -c 'import sys; assert sys.version_info[:2] == (3, 9), sys.version'
+          /usr/bin/python3 --version
+          /usr/bin/python3 -B -m unittest discover -s tests -v
