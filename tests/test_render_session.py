@@ -581,7 +581,8 @@ class OutputFileTest(ResetLangMixin, unittest.TestCase):
 
     def test_skill_directory_in_another_letter_case_is_refused(self):
         # Needs a case-insensitive file system (macOS by default). The CI runs on Linux and reports this test as
-        # skipped, so run the tests on a Mac before a release (README: Development).
+        # skipped, so run the tests on a Mac before merging someone else's pull request and before a release
+        # (README: Development).
         with tempfile.TemporaryDirectory() as tmp:
             skill = Path(tmp) / "skill"
             (skill / "assets").mkdir(parents=True)

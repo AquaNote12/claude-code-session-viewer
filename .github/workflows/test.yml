@@ -3,7 +3,7 @@ name: Tests
 # The required checks. They run on Linux, where runners are always available; the code uses only the
 # standard library, and the few macOS-specific paths are simulated in the tests. A test that needs macOS's
 # case-insensitive file system is reported as skipped here, so the tests are also run by hand on a Mac before
-# each release (README: Development). A macOS job was tried, but its runners were often unavailable for a long time.
+# merging someone else's pull request and before each release (README: Development). A macOS job was tried, but its runners were often unavailable for a long time.
 
 on:
   push:
