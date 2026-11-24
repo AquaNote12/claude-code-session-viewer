@@ -350,7 +350,9 @@ class SecurityTest(ResetLangMixin, unittest.TestCase):
             {"type": "custom-title", "customTitle": "MARK_TITLE"},
             user_rec([{"type": "text", "text": "<ide_selection>The user selected the lines 1 to 2 from /tmp/MARK_SEL.py:\nx</ide_selection>"
                                                "MARK_USER_MESSAGE"},
-                      {"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": png}}],
+                      {"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": png}},
+                      {"type": "document", "title": "MARK_DOCUMENT_TITLE",
+                       "source": {"type": "base64", "media_type": "application/pdf", "data": "MARK_DOCUMENT_DATA"}}],
                      cwd="/tmp/MARK_CWD", gitBranch="MARK_BRANCH"),
             assistant_rec([{"type": "thinking", "thinking": "MARK_THINKING_GONE"},
                            {"type": "tool_use", "id": "t1", "name": "Bash", "input": {"command": "MARK_TOOL_GONE"}},
@@ -382,7 +384,8 @@ class SecurityTest(ResetLangMixin, unittest.TestCase):
         for marker in kept:
             with self.subTest(kept=marker):
                 self.assertIn(marker, page)
-        for marker in ("MARK_THINKING_GONE", "MARK_TOOL_GONE"):
+        self.assertIn("MARK_DOCUMENT_TITLE", page)  # the title of an attached document (its data is never shown)
+        for marker in ("MARK_THINKING_GONE", "MARK_TOOL_GONE", "MARK_DOCUMENT_DATA"):
             with self.subTest(removed=marker):
                 self.assertNotIn(marker, page)
 
