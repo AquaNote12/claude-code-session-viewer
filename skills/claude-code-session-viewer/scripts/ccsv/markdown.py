@@ -4,13 +4,21 @@ import re
 
 from .util import esc
 
-INLINE_CODE_RE = re.compile(r"`([^`\n]+)`")
-LINK_RE = re.compile(r"\[([^\]\n]+)\]\((https?://[^)\s]+)\)")
+# The transcript is untrusted input, so every pattern must run in linear time: spans are length-capped
+# ({1,500}) so that an opening marker without a closing one cannot make the search rescan the whole line.
+INLINE_CODE_RE = re.compile(r"`([^`\n]{1,2000})`")
+LINK_RE = re.compile(r"\[([^\[\]\n]{1,500})\]\((https?://[^)\s]{1,2000})\)")
 AUTOLINK_RE = re.compile(r"(?<![\"'=>])(https?://[^\s<>\"')\]]+)")
-BOLD_RE = re.compile(r"\*\*(?=\S)(.+?)(?<=\S)\*\*")
-STRIKE_RE = re.compile(r"~~(?=\S)(.+?)(?<=\S)~~")
+BOLD_RE = re.compile(r"\*\*(?=\S)([^\n]{1,500}?)(?<=\S)\*\*")
+STRIKE_RE = re.compile(r"~~(?=\S)([^\n]{1,500}?)(?<=\S)~~")
 LIST_RE = re.compile(r"^(\s*)([-*+]|\d+[.)])\s+(.*)$")
-TABLE_SEP_RE = re.compile(r"^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?\s*$")
+TABLE_SEP_CELL_RE = re.compile(r":?-{2,}:?")
+MAX_QUOTE_DEPTH = 8
+
+# Placeholders for already-rendered fragments. They are private-use characters, removed from the input first,
+# so the input cannot forge a reference to a fragment.
+SLOT_OPEN, SLOT_CLOSE = "", ""
+SLOT_RE = re.compile(SLOT_OPEN + r"(\d+)" + SLOT_CLOSE)
 
 
 def md_inline(text):
@@ -18,8 +26,9 @@ def md_inline(text):
 
     def keep(fragment):
         slots.append(fragment)
-        return "\x00%d\x00" % (len(slots) - 1)
+        return "%s%d%s" % (SLOT_OPEN, len(slots) - 1, SLOT_CLOSE)
 
+    text = text.replace(SLOT_OPEN, "").replace(SLOT_CLOSE, "")
     text = INLINE_CODE_RE.sub(lambda m: keep("<code>%s</code>" % esc(m.group(1))), text)
     text = LINK_RE.sub(
         lambda m: keep('<a href="%s" target="_blank" rel="noopener noreferrer">%s</a>' % (esc(m.group(2)), esc(m.group(1)))),
@@ -32,7 +41,15 @@ def md_inline(text):
     text = esc(text)
     text = BOLD_RE.sub(r"<strong>\1</strong>", text)
     text = STRIKE_RE.sub(r"<del>\1</del>", text)
-    return re.sub(r"\x00(\d+)\x00", lambda m: slots[int(m.group(1))], text)
+    return SLOT_RE.sub(lambda m: slots[int(m.group(1))], text)
+
+
+def is_table_sep(line):
+    """True for a table separator row such as "|---|:--:|". Checked cell by cell to stay linear."""
+    if "-" not in line:
+        return False
+    cells = split_row(line)
+    return all(TABLE_SEP_CELL_RE.fullmatch(c) for c in cells)
 
 
 def split_row(line):
@@ -77,7 +94,7 @@ def render_list(lines):
     return "".join(out)
 
 
-def md_to_html(src):
+def md_to_html(src, depth=0):
     src = (src or "").replace("\r\n", "\n")
     lines = src.split("\n")
     out = []
@@ -122,15 +139,15 @@ def md_to_html(src):
             out.append("<hr>")
             i += 1
             continue
-        if stripped.startswith(">"):
+        if stripped.startswith(">") and depth < MAX_QUOTE_DEPTH:  # deeper quotes stay plain text
             flush_para()
             quote = []
             while i < len(lines) and lines[i].strip().startswith(">"):
                 quote.append(re.sub(r"^\s*>\s?", "", lines[i]))
                 i += 1
-            out.append("<blockquote>%s</blockquote>" % md_to_html("\n".join(quote)))
+            out.append("<blockquote>%s</blockquote>" % md_to_html("\n".join(quote), depth + 1))
             continue
-        if "|" in stripped and i + 1 < len(lines) and TABLE_SEP_RE.match(lines[i + 1]):
+        if "|" in stripped and i + 1 < len(lines) and is_table_sep(lines[i + 1]):
             flush_para()
             head = split_row(lines[i])
             i += 2

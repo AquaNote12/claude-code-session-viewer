@@ -18,7 +18,7 @@ MESSAGES = {
     "cli_limit": "maximum number of sessions to list",
     "cli_render": "convert a session into HTML",
     "cli_session": "session ID (a unique prefix is enough) or path to a JSONL file",
-    "cli_out": "output file or directory (default: {path})",  # {path}: default output directory
+    "cli_out": "output .html file, or a directory to write into (default: {path})",  # {path}: default output directory
     "cli_no_subagents": "do not include subagent conversations",
     "cli_no_tools": "leave tool calls and their results out of the page (they also hold subagent conversations)",
     "cli_no_thinking": "leave Claude's thinking out of the page",
@@ -32,6 +32,9 @@ MESSAGES = {
     "cli_lang": "language of the output (default: from the OS locale, otherwise English)",
     "err_not_found": "Session not found: {arg} (searched under {dir})",  # {arg}: what the user passed
     "err_ambiguous": "The ID matches more than one session. Please give a longer ID:",  # followed by the matches
+    "err_session_id": "Not a session ID: {arg} (give at least 4 letters, digits or hyphens, or a path to a .jsonl file)",
+    "err_write": "Could not write {path}: {error}",  # {error}: OS error message (e.g. it is a symbolic link)
+    "err_out_dir": "Could not use {path} as the output directory: {error}",
     "list_fallback": "(No sessions found for {dir}; listing all projects instead)",
     "untitled": "(untitled)",  # session list: a session without a title or prompt
     "rendered": "Wrote: {path}",

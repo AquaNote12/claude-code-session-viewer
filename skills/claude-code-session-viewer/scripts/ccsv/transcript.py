@@ -37,10 +37,17 @@ def project_dir_name(path):
     return re.sub(r"[^A-Za-z0-9]", "-", str(path))
 
 
+SESSION_ID_RE = re.compile(r"[0-9A-Za-z][0-9A-Za-z-]{3,}")
+
+
 def resolve_session(arg):
     p = Path(arg).expanduser()
     if p.suffix == ".jsonl" and p.is_file():
         return p
+    # At least 4 characters, so that an empty or tiny argument (e.g. an unsubstituted variable)
+    # cannot quietly pick some other session.
+    if not SESSION_ID_RE.fullmatch(arg or ""):
+        raise SessionLookupError(t("err_session_id", arg=arg))
     hits = [f for f in all_session_files() if f.stem.startswith(arg)]
     if not hits:
         raise SessionLookupError(t("err_not_found", arg=arg, dir=PROJECTS_DIR))
@@ -64,7 +71,9 @@ def peek_session(path):
                     continue
                 try:
                     d = json.loads(line)
-                except json.JSONDecodeError:
+                except (ValueError, RecursionError):
+                    continue
+                if not isinstance(d, dict):
                     continue
                 kind = d.get("type")
                 if kind == "custom-title":
@@ -97,15 +106,31 @@ def user_texts(rec):
     return []
 
 
-PROMPT_TAG_RE = re.compile(r"<(ide_opened_file|ide_selection|system-reminder)>(.*?)</\1>", re.S)
+PROMPT_TAG_OPEN_RE = re.compile(r"<(ide_opened_file|ide_selection|system-reminder)>")
 
 
 def clean_prompt_text(text):
-    """Remove tags injected by the IDE and others; return (text, notes)."""
-    notes = []
+    """Remove tags injected by the IDE and others; return (text, notes).
 
-    def take(m):
-        tag, body = m.group(1), m.group(2).strip()
+    Scans with str.find instead of a lazy regex: with many opening tags and no closing tag, a regex
+    would rescan to the end of the text for every opening tag (quadratic time).
+    """
+    text = text or ""
+    notes, kept, pos, unclosed = [], [], 0, set()
+    while True:
+        m = PROMPT_TAG_OPEN_RE.search(text, pos)
+        while m and m.group(1) in unclosed:
+            m = PROMPT_TAG_OPEN_RE.search(text, m.end())
+        if not m:
+            break
+        tag = m.group(1)
+        close = text.find("</%s>" % tag, m.end())
+        if close < 0:
+            unclosed.add(tag)  # no closing tag later in the text, so no later opening tag can match either
+            continue
+        kept.append(text[pos:m.start()])
+        body = text[m.end():close].strip()
+        pos = close + len(tag) + 3
         if tag == "ide_opened_file":
             fm = re.search(r"opened the file (.+?) in the IDE", body)
             notes.append((t("ide_opened_file"), fm.group(1) if fm else body, False))
@@ -116,15 +141,19 @@ def clean_prompt_text(text):
             else:
                 label = t("ide_selection")
             notes.append((label, body, True))
-        return ""
-
-    text = PROMPT_TAG_RE.sub(take, text or "")
-    return text.strip(), notes
+    kept.append(text[pos:])
+    return "".join(kept).strip(), notes
 
 
 def tag_value(text, tag):
-    m = re.search(r"<%s>(.*?)</%s>" % (tag, tag), text or "", re.S)
-    return m.group(1).strip() if m else ""
+    """The content of the first <tag>...</tag> in text (linear time; see clean_prompt_text)."""
+    text = text or ""
+    start = text.find("<%s>" % tag)
+    if start < 0:
+        return ""
+    start += len(tag) + 2
+    end = text.find("</%s>" % tag, start)
+    return text[start:end].strip() if end >= 0 else ""
 
 
 SAFE_IMAGE_TYPES = ("image/png", "image/jpeg", "image/gif", "image/webp")
@@ -286,10 +315,11 @@ class Builder:
     # --- main loop ------------------------------------------------------------
     def build(self):
         for rec in self.records:
-            self._collect_meta(rec)
-            kind = rec.get("type")
-            ts = parse_ts(rec.get("timestamp"))
+            ts = None
             try:
+                self._collect_meta(rec)
+                kind = rec.get("type")
+                ts = parse_ts(rec.get("timestamp"))
                 if kind == "user":
                     self._on_user(rec, ts)
                 elif kind == "assistant":
@@ -337,7 +367,8 @@ class Builder:
         # Tool results
         results = [b for b in blocks if isinstance(b, dict) and b.get("type") == "tool_result"]
         for b in results:
-            part = self.tools.get(b.get("tool_use_id"))
+            tool_use_id = b.get("tool_use_id")
+            part = self.tools.get(tool_use_id) if isinstance(tool_use_id, str) else None
             if part is not None:
                 part["result"] = b.get("content")
                 part["is_error"] = bool(b.get("is_error"))
@@ -435,16 +466,20 @@ class Builder:
                 if b.get("thinking", "").strip():
                     bubble["parts"].append({"type": "thinking", "text": b["thinking"]})
             elif bt in ("tool_use", "server_tool_use"):
-                part = {"type": "tool", "id": b.get("id"), "name": b.get("name", "?"),
-                        "input": b.get("input") or {}, "result": None, "is_error": False, "subagent": None}
-                sub = self.subagents.get(b.get("id"))
+                tool_id = b.get("id") if isinstance(b.get("id"), str) else None
+                name = b.get("name") if isinstance(b.get("name"), str) else "?"
+                inp = b.get("input") if isinstance(b.get("input"), dict) else {}
+                part = {"type": "tool", "id": tool_id, "name": name,
+                        "input": inp, "result": None, "is_error": False, "subagent": None}
+                sub = self.subagents.get(tool_id) if tool_id else None
                 if sub:
                     part["subagent"] = sub
                     self._attach_subagent(part, bubble)
-                self.tools[b.get("id")] = part
+                if tool_id:
+                    self.tools[tool_id] = part
                 bubble["parts"].append(part)
-            elif (bt or "").endswith("_tool_result"):
-                part = self.tools.get(b.get("tool_use_id"))
+            elif isinstance(bt, str) and bt.endswith("_tool_result"):
+                part = self.tools.get(b.get("tool_use_id")) if isinstance(b.get("tool_use_id"), str) else None
                 if part is not None:
                     part["result"] = b.get("content")
 

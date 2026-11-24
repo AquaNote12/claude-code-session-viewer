@@ -143,10 +143,14 @@ def tool_input_html(name, inp, has_subagent=False):
         return fold_block(t("written_content", n=inp["content"].count("\n") + 1), pre(inp["content"]))
     if name == "TodoWrite" and isinstance(inp.get("todos"), list):
         marks = {"completed": "☑", "in_progress": "▶", "pending": "☐"}
-        rows = "".join('<li class="todo-%s">%s %s</li>' % (esc(td.get("status")), marks.get(td.get("status"), "•"),
-                                                          esc(td.get("content") or td.get("activeForm") or ""))
-                       for td in inp["todos"] if isinstance(td, dict))
-        return '<ul class="todos">%s</ul>' % rows
+        rows = []
+        for td in inp["todos"]:
+            if not isinstance(td, dict):
+                continue
+            status = td.get("status") if isinstance(td.get("status"), str) else ""
+            rows.append('<li class="todo-%s">%s %s</li>' % (esc(status), marks.get(status, "•"),
+                                                           esc(td.get("content") or td.get("activeForm") or "")))
+        return '<ul class="todos">%s</ul>' % "".join(rows)
     if name in ("Agent", "Task") and isinstance(inp.get("prompt"), str):
         # When the subagent's transcript exists, the prompt is shown as its first bubble instead.
         return "" if has_subagent else fold_block(t("subagent_prompt"), md_to_html(inp["prompt"]))
@@ -263,6 +267,16 @@ def is_long(item):
 
 
 def render_item(item, idx, depth=0):
+    """HTML for one item. An item that cannot be rendered becomes a warning row instead of breaking the page."""
+    try:
+        return _render_item(item, idx, depth)
+    except Exception as e:  # noqa: BLE001 - the transcript is untrusted; keep the rest of the page
+        warning = {"kind": "system", "ts": item.get("ts"), "label": t("record_error", error=type(e).__name__),
+                   "body": None, "body_is_html": False, "level": "warn", "fold": False}
+        return _render_item(warning, idx, depth)
+
+
+def _render_item(item, idx, depth=0):
     kind = item["kind"]
     ts = fmt_ts(item["ts"])
     if kind == "system":

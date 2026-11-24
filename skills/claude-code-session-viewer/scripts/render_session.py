@@ -28,7 +28,7 @@ from ccsv.render import filter_items, render_page  # noqa: E402
 from ccsv.transcript import (  # noqa: E402
     Builder, SessionLookupError, all_session_files, peek_session, project_dir_name, resolve_session,
 )
-from ccsv.util import fmt_num, one_line  # noqa: E402
+from ccsv.util import clean_line, fmt_num  # noqa: E402
 
 DEFAULT_OUT_DIR = Path.home() / "Downloads" / "claude-code-sessions"
 
@@ -64,9 +64,36 @@ def cmd_list(args):
     for f in files[: args.limit]:
         title, first, cwd = peek_session(f)
         mtime = dt.datetime.fromtimestamp(f.stat().st_mtime).strftime("%Y-%m-%d %H:%M")
-        print("%s  %s  %s" % (f.stem, mtime, one_line(title or first or t("untitled"), 60)))
+        # Titles, prompts and paths come from transcripts: one line each, without control characters,
+        # so they cannot rewrite the terminal or pose as separate lines of output (e.g. instructions to Claude).
+        print("%s  %s  %s" % (clean_line(f.stem, 80), mtime, clean_line(title or first or t("untitled"), 60)))
         if args.all or cwd:
-            print("    cwd: %s" % (cwd or f.parent.name))
+            print("    cwd: %s" % clean_line(cwd or f.parent.name, 200))
+
+
+def output_path(out_arg, filename):
+    """Where to write: a path ending in .html is the file itself; anything else is a directory to write into."""
+    if not out_arg:
+        return DEFAULT_OUT_DIR / filename
+    out = Path(out_arg).expanduser()
+    return out if out.suffix.lower() == ".html" else out / filename
+
+
+def write_page(out, page):
+    """Write the page readable by the owner only, without following a symbolic link at the destination."""
+    try:
+        out.parent.mkdir(parents=True, exist_ok=True)
+    except OSError as e:
+        sys.exit(t("err_out_dir", path=out.parent, error=e.strerror or e))
+    flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        fd = os.open(str(out), flags, 0o600)
+    except OSError as e:
+        sys.exit(t("err_write", path=out, error=e.strerror or e))
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        if hasattr(os, "fchmod"):
+            os.fchmod(fd, 0o600)  # an existing file keeps its old mode otherwise
+        f.write(page)
 
 
 def cmd_render(args):
@@ -77,11 +104,8 @@ def cmd_render(args):
     builder = Builder(path, include_subagents=not args.no_subagents)
     items = filter_items(builder.build(), include_tools=not args.no_tools, include_thinking=not args.no_thinking)
     page, filename = render_page(builder, items)
-    out = Path(args.out).expanduser() if args.out else DEFAULT_OUT_DIR / filename
-    if out.is_dir():
-        out = out / filename
-    out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(page, encoding="utf-8")
+    out = output_path(args.out, filename)
+    write_page(out, page)
     n = sum(1 for it in items if it["kind"] in ("user", "assistant"))
     print(t("rendered", path=out))
     print(t("source", path=path))
