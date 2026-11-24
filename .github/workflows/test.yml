@@ -1,0 +1,52 @@
+name: Tests
+
+# The required checks. They run on Linux, where runners are always available; the code uses only the
+# standard library, and the few macOS-specific paths are simulated in the tests. A test that needs macOS's
+# case-insensitive file system is reported as skipped here, so the tests are also run by hand on a Mac before
+# merging someone else's pull request and before each release (README: Development). A macOS job was tried,
+# but its runners were often unavailable for a long time.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  # Cancel an older run only on pull requests; every commit on main keeps its own result.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  test:
+    # The resulting names, "Python 3.9" and "Python 3 (latest)", are the required status checks of the ruleset on
+    # main. If you change them, change the ruleset as well, or every pull request waits for the old names forever.
+    name: Python ${{ matrix.name }}
+    # Not ubuntu-latest: actions/setup-python has no Python 3.9 build for Ubuntu 26.04 (3.9 is end of life).
+    # When ubuntu-24.04 is retired or the 3.9 builds disappear, either run the 3.9 job in a python:3.9 container,
+    # or raise the minimum Python version (README, this matrix and the ruleset's required checks together).
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: "3.9"          # the oldest supported version (README: Requirements)
+            python: "3.9"
+          - name: "3 (latest)"
+            python: "3.x"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: Run the tests
+        run: |
+          python3 --version
+          python3 -B -m unittest discover -s tests -v

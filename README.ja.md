@@ -44,7 +44,7 @@ Claude Code のセッション履歴を、メッセージアプリ風の吹き�
 
 ### 対応 OS
 
-この skill は **macOS でのみ**開発・確認している。Linux と Windows では確認していない。分かっている問題は次のとおり。
+この skill は **macOS でのみ**開発・確認している。単体テストは CI で Linux でも実行しているが、skill としての動作は Linux と Windows では確認していない。分かっている問題は次のとおり。
 
 - Windows では `python3` コマンドがない（`python` や `py` しかない）ことがあり、Python 3.15 より前では日本語のファイル名を表示するときにエラーになることがある
 - OS の設定からの言語判定は macOS と Linux では動くが、Windows ではほぼ英語になる
@@ -199,9 +199,11 @@ claude-code-session-viewer/
 ├── docs/
 │   ├── make_screenshots.py              # 架空のデモセッションから docs/images/ を作り直す
 │   └── images/                          # この README で使っている画像
+├── .github/workflows/                   # テストを実行する（GitHub Actions）
 ├── LICENSE
 ├── README.md
 ├── README.ja.md
+├── SECURITY.md
 └── .gitignore
 ```
 
@@ -212,6 +214,15 @@ skill のディレクトリの中身（`SKILL.md` と `scripts/`）は Agent Ski
 ```bash
 python3 -m unittest discover -s tests
 ```
+
+GitHub Actions が、PR と `main` への push のたびに、Linux の Python 3.9 と最新の Python 3 でテストを実行する（`.github/workflows/test.yml`）。これがマージに必須のチェック。
+
+CI は macOS では実行しない。また、テストのうち 1 件は macOS の大文字小文字を区別しないファイルシステムが必要で、Linux ではスキップと表示される。他の人の PR をマージする前と、リリースの前に、Mac で次を確認する。
+
+1. 標準の Python でテストを実行する: `/usr/bin/python3 -B -m unittest discover -s tests`。スキップが 0 件であること
+2. skill で実際のセッションを書き出し（`render` から `open`）、ブラウザで表示を確かめる
+
+セキュリティの問題の報告方法は [SECURITY.md](SECURITY.md) を参照。
 
 変更する場所（パスはリポジトリのルートから）:
 

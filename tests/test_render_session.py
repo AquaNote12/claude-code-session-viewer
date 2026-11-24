@@ -575,13 +575,28 @@ class OutputFileTest(ResetLangMixin, unittest.TestCase):
                                 encoding="utf-8")
             # The template is never taken for a generated page, even outside the skill (defence in depth).
             self.assertFalse(render_session.looks_generated(template))
-            other_case = Path(tmp) / "SKILL" / "assets" / "page.html"
             with mock.patch.object(render_session, "SKILL_DIR", skill.resolve()):
                 self.assertTrue(render_session.inside_skill(skill.resolve() / "assets" / "new"))
                 self.assertFalse(render_session.inside_skill(Path(tmp).resolve()))
-                if other_case.exists():  # a case-insensitive file system, as on macOS by default
-                    with self.assertRaises(SystemExit):
-                        self.run_render(str(other_case))
+
+    def test_skill_directory_in_another_letter_case_is_refused(self):
+        # Needs a case-insensitive file system (macOS by default). The CI runs on Linux and reports this test as
+        # skipped, so run the tests on a Mac before merging someone else's pull request and before a release
+        # (README: Development).
+        with tempfile.TemporaryDirectory() as tmp:
+            skill = Path(tmp) / "skill"
+            (skill / "assets").mkdir(parents=True)
+            other_case = Path(tmp) / "SKILL" / "assets" / "page.html"
+            if not other_case.parent.exists():
+                self.skipTest("the file system is case-sensitive")
+            template = skill / "assets" / "page.html"
+            template.write_text('<script id="ccsv-data" type="application/json">{{DATA_JSON}}</script>',
+                                encoding="utf-8")
+            with mock.patch.object(render_session, "SKILL_DIR", skill.resolve()), \
+                    self.assertRaises(SystemExit) as cm:
+                self.run_render(str(other_case))
+            # Refused for being inside the skill, not merely because the template is not a generated page.
+            self.assertIn("inside the skill", str(cm.exception.code))
             self.assertIn("{{DATA_JSON}}", template.read_text(encoding="utf-8"))
 
     def test_session_mentioning_the_template_placeholder_can_be_exported_again(self):
