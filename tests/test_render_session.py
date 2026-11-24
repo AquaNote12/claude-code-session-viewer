@@ -514,6 +514,10 @@ class OutputFileTest(ResetLangMixin, unittest.TestCase):
                 "upper-case META": genuine.replace("</body>", "<META HTTP-EQUIV=refresh CONTENT=0;url=x></body>"),
                 "link": genuine.replace("</body>", '<link rel="dns-prefetch" href="//leak.attacker.example"></body>'),
                 "base": genuine.replace("<title>", '<base href="https://attacker.example/"><title>', 1),
+                "iframe srcdoc": genuine.replace(
+                    "</body>", '<iframe srcdoc="&lt;link rel=dns-prefetch href=//leak.attacker.example&gt;"></iframe></body>'),
+                "object": genuine.replace("</body>", '<object data="https://attacker.example/"></object></body>'),
+                "embed": genuine.replace("</body>", '<EMBED src="https://attacker.example/"></body>'),
             }
             with mock.patch.object(render_session.webbrowser, "open") as opened:
                 for name, html_text in forged.items():
