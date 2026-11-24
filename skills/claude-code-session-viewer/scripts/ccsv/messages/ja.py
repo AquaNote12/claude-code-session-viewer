@@ -11,6 +11,7 @@ MESSAGES = {
     "cli_render": "セッションを HTML に変換する",
     "cli_session": "セッション ID（先頭一致可）または JSONL ファイルのパス",
     "cli_out": "出力先の .html ファイル、または書き出すディレクトリ（既定: {path}）",
+    "cli_force": "--out のファイルが、このツールで生成したページでなくても置き換える",
     "cli_no_subagents": "サブエージェントのやり取りを含めない",
     "cli_no_tools": ("ツール呼び出しとその結果を、その中のサブエージェントのやり取りも含めてページに入れない"
                      "。すべてが消えるわけではなく、たとえばセッション情報、会話、コマンドの出力、"
@@ -28,6 +29,12 @@ MESSAGES = {
     "err_ambiguous": "ID が複数のセッションに一致しました。もっと長く指定してください:",
     "err_session_id": "セッション ID として扱えません: {arg}（英数字とハイフンで 4 文字以上、または .jsonl ファイルのパスを指定してください）",
     "err_write": "{path} に書き込めませんでした: {error}",
+    "err_out_exists": ("{path} は claude-code-session-viewer で生成したページではないため、上書きしません。"
+                       "別の --out を指定してください。置き換えられるのは、人が --force を付けてスクリプトを実行したときだけです。"),
+    "reason_symlink": "シンボリックリンクです",
+    "reason_not_file": "通常のファイルではありません",
+    "err_out_in_skill": "{path} は skill 自体の中にあるため、書き出しません。別の --out を指定してください。",
+    "err_template": "skill のページのテンプレートが壊れています（{part} がありません）。skill を入れ直してください。",
     "err_out_dir": "{path} を出力先のディレクトリとして使えません: {error}",
     "list_fallback": "（{dir} のセッションが無いため、全プロジェクトを表示します）",
     "untitled": "(タイトルなし)",

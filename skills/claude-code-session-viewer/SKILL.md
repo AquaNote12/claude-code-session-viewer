@@ -46,6 +46,7 @@ Script: `${CLAUDE_SKILL_DIR}/scripts/render_session.py`
    - The default output is `~/Downloads/claude-code-sessions/<title>_<first 8 characters of the ID>_<lang>.html`, so the Japanese and English pages of a session do not overwrite each other. Pass `--out` only when the user names a location.
    - Subagent conversations are included by default. Pass `--no-subagents` if the user does not want them.
    - If the user wants to leave tool calls and their results out (e.g. to share the page), pass `--no-tools`; to leave out Claude's thinking, pass `--no-thinking`.
+   - If the script refuses to write (an existing file it did not generate, or a location inside the skill), tell the user what it said and suggest another `--out`, or that they move or delete the file themselves. Never pass `--force`: it is only for people running the script by hand.
 4. Tell the user the output path exactly as the script printed it, and pass on the script's note about sensitive information. Ask whether to open it in the browser. If they want, open it with the script, putting the path in single quotes:
    ```bash
    python3 "${CLAUDE_SKILL_DIR}/scripts/render_session.py" open '<output path>' --lang <lang>

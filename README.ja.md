@@ -125,11 +125,11 @@ Claude Code の中で次のように呼び出す。
 
 ```bash
 python3 skills/claude-code-session-viewer/scripts/render_session.py list [--all] [--limit N] [--project DIR | --current-session SESSION] [--lang en|ja]
-python3 skills/claude-code-session-viewer/scripts/render_session.py render <セッションID | JSONLのパス> [--out PATH] [--no-subagents] [--no-tools] [--no-thinking] [--lang en|ja]
+python3 skills/claude-code-session-viewer/scripts/render_session.py render <セッションID | JSONLのパス> [--out PATH] [--force] [--no-subagents] [--no-tools] [--no-thinking] [--lang en|ja]
 python3 skills/claude-code-session-viewer/scripts/render_session.py open <生成した HTML のパス>
 ```
 
-- **出力先**: 既定は `~/Downloads/claude-code-sessions/<タイトル>_<セッションIDの先頭8文字>_<言語>.html`。タイトルは 60 文字までに縮め、文字・数字・`_`・`-`・`.` だけを残す。`--out` には、`.html` で終わるパスなら書き出すファイルを、それ以外ならディレクトリ（なければ作る）を指定する。既存のファイルは置き換えるが、出力先のシンボリックリンクはたどらない。
+- **出力先**: 既定は `~/Downloads/claude-code-sessions/<タイトル>_<セッションIDの先頭8文字>_<言語>.html`。タイトルは 60 文字までに縮め、文字・数字・`_`・`-`・`.` だけを残す。`--out` には、`.html` で終わるパスなら書き出すファイルを、それ以外ならディレクトリ（なければ作る）を指定する。既存のファイルは、このツールで生成したページのときだけ置き換える。それ以外のファイルを置き換えたいときは、自分でスクリプトを `--force` 付きで実行する（skill は `--force` を付けない）。これは誤った上書きを防ぐためのもので、履歴の中の文章によって Claude が操作された場合の完全な対策ではない。ページはいったん一時ファイルに書いてから置き換えるので、書き込みに失敗しても壊れたページは残らない。出力先のシンボリックリンクは決してたどらず、skill 自体の中には書き出さない。
 - **`list`** は 1 つのプロジェクトのセッションを新しい順に表示する（既定 15 件。`--limit` で変更）。対象は `--project` で指定したプロジェクト、なければ `--current-session` で渡したセッションのプロジェクト（skill は現在のセッションを渡す）、それもなければカレントディレクトリ。そのプロジェクトにセッションがなければ、代わりに全プロジェクトを表示する。`--all` を付けると常に全プロジェクトを表示する。
 - **`open`** は生成した HTML ファイルを既定のブラウザで開く（Python の `webbrowser` を使うので、シェルのコマンドは介さない）。このツールで生成したページだけを開く。
 

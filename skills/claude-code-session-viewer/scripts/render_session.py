@@ -3,7 +3,7 @@
 
 Usage:
   render_session.py list [--all] [--limit N] [--project DIR] [--current-session SESSION] [--lang ja|en]
-  render_session.py render SESSION [--out PATH] [--no-subagents] [--no-tools] [--no-thinking] [--lang ja|en]
+  render_session.py render SESSION [--out PATH] [--force] [--no-subagents] [--no-tools] [--no-thinking] [--lang ja|en]
   render_session.py open PATH
 
 SESSION is a session ID (a unique prefix is enough) or a path to a JSONL file.
@@ -16,6 +16,7 @@ import argparse
 import datetime as dt
 import os
 import sys
+import tempfile
 import webbrowser
 from pathlib import Path
 
@@ -29,6 +30,7 @@ from ccsv.transcript import (  # noqa: E402
     Builder, SessionLookupError, all_session_files, peek_session, project_dir_name, resolve_session,
 )
 from ccsv.util import clean_line, fmt_num  # noqa: E402
+from ccsv.render import TemplateError  # noqa: E402  (own line: keeps merges with other branches clean)
 
 DEFAULT_OUT_DIR = Path.home() / "Downloads" / "claude-code-sessions"
 
@@ -79,21 +81,89 @@ def output_path(out_arg, filename):
     return out if out.suffix.lower() == ".html" else out / filename
 
 
+def looks_generated(path):
+    """True if the existing file looks like a page this tool generated (any version), so it may be replaced."""
+    try:
+        data = path.read_bytes()
+    except OSError:
+        return False
+    if GENERATED_PAGE_MARKER + b"{{DATA_JSON}}" in data:
+        # The page template itself. Only this exact sequence: a generated page may contain "{{DATA_JSON}}" in
+        # its text (a session that talked about it), but there the marker is followed by JSON.
+        return False
+    if GENERATED_PAGE_MARKER in data:
+        return True
+    # Pages from versions before the data block existed still carry the tool's name in the footer.
+    return b'<div class="footer">' in data and b"claude-code-session-viewer" in data
+
+
+SKILL_DIR = Path(__file__).resolve().parent.parent  # the installed skill: SKILL.md, scripts/, assets
+
+
+def inside_skill(directory):
+    """True if the directory is the skill directory or inside it. Compared by file identity, not by spelling,
+    so that a path written in another letter case or Unicode form (same directory on macOS) is caught too."""
+    for p in (directory, *directory.parents):
+        try:
+            if os.path.samefile(str(p), str(SKILL_DIR)):
+                return True
+        except OSError:
+            continue  # does not exist (yet)
+    return False
+
+
+def check_destination(out, force):
+    """Refuse destinations that must not be written, before anything is written.
+
+    - Anything inside the skill itself (e.g. the page template, which carries the generated-page marker):
+      overwriting it would make every later export silently produce the wrong page. --force does not help.
+    - A symbolic link, or something that is not a regular file (a directory, a FIFO, ...).
+    - An existing file that this tool did not generate, unless --force is given. The skill may run the script
+      without asking, so --out must not be usable to clobber, say, a project's index.html. (The skill itself
+      never passes --force; it is meant for people running the script by hand.)
+    """
+    try:
+        real_parent = out.parent.resolve()
+    except (OSError, RuntimeError):
+        real_parent = out.parent
+    if inside_skill(real_parent):
+        sys.exit(t("err_out_in_skill", path=out))
+    if out.is_symlink():
+        sys.exit(t("err_write", path=out, error=t("reason_symlink")))
+    if not out.exists():
+        return
+    if not out.is_file():
+        sys.exit(t("err_write", path=out, error=t("reason_not_file")))
+    if not force and out.stat().st_size > 0 and not looks_generated(out):
+        # An empty file is allowed: it is what an interrupted write of an older version could leave behind.
+        sys.exit(t("err_out_exists", path=out))
+
+
 def write_page(out, page):
-    """Write the page readable by the owner only, without following a symbolic link at the destination."""
+    """Write the page readable by the owner only, atomically: a temporary file in the same directory is
+    written first and then renamed over the destination, so a failed write never leaves a broken page and
+    a symbolic link at the destination is never followed."""
     try:
         out.parent.mkdir(parents=True, exist_ok=True)
     except OSError as e:
         sys.exit(t("err_out_dir", path=out.parent, error=e.strerror or e))
-    flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC | getattr(os, "O_NOFOLLOW", 0)
     try:
-        fd = os.open(str(out), flags, 0o600)
+        fd, tmp = tempfile.mkstemp(dir=str(out.parent), prefix=".ccsv-", suffix=".tmp")  # created with mode 600
     except OSError as e:
         sys.exit(t("err_write", path=out, error=e.strerror or e))
-    with os.fdopen(fd, "w", encoding="utf-8") as f:
-        if hasattr(os, "fchmod"):
-            os.fchmod(fd, 0o600)  # an existing file keeps its old mode otherwise
-        f.write(page)
+    try:
+        # errors="replace": a lone surrogate (possible in JSON escapes of a transcript) must not stop the export.
+        with os.fdopen(fd, "w", encoding="utf-8", errors="replace", newline="\n") as f:
+            f.write(page)
+        os.replace(tmp, str(out))
+    except BaseException as e:  # also Ctrl-C: never leave a partial copy of the transcript behind
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        if isinstance(e, OSError):
+            sys.exit(t("err_write", path=out, error=e.strerror or e))
+        raise
 
 
 def cmd_render(args):
@@ -103,13 +173,17 @@ def cmd_render(args):
         sys.exit(str(e))
     builder = Builder(path, include_subagents=not args.no_subagents)
     items = filter_items(builder.build(), include_tools=not args.no_tools, include_thinking=not args.no_thinking)
-    page, filename = render_page(builder, items)
+    try:
+        page, filename = render_page(builder, items)
+    except TemplateError as e:
+        sys.exit(str(e))
     out = output_path(args.out, filename)
+    check_destination(out, args.force)
     write_page(out, page)
     n = sum(1 for it in items if it["kind"] in ("user", "assistant"))
     print(t("rendered", path=out))
     print(t("source", path=path))
-    print(t("stats", n=n, kb=fmt_num(len(page.encode("utf-8")) // 1024)))
+    print(t("stats", n=n, kb=fmt_num(len(page.encode("utf-8", errors="replace")) // 1024)))
     print(t("privacy_notice"))
 
 
@@ -156,6 +230,7 @@ def build_parser():
     rp.add_argument("--no-subagents", action="store_true", help=t("cli_no_subagents"))
     rp.add_argument("--no-tools", action="store_true", help=t("cli_no_tools"))
     rp.add_argument("--no-thinking", action="store_true", help=t("cli_no_thinking"))
+    rp.add_argument("--force", action="store_true", help=t("cli_force"))
     rp.add_argument("--lang", choices=SUPPORTED_LANGS, help=lang_help)
     op = sub.add_parser("open", help=t("cli_open"))
     op.add_argument("path", help=t("cli_open_path"))
