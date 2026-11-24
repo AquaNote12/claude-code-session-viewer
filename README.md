@@ -199,7 +199,8 @@ claude-code-session-viewer/
 │   └── images/                          # screenshots used in this README
 ├── .github/
 │   ├── workflows/                       # runs the tests (GitHub Actions)
-│   └── dependabot.yml                   # keeps the actions up to date
+│   ├── dependabot.yml                   # keeps the actions up to date
+│   └── CODEOWNERS                       # every pull request needs the owner's approval
 ├── LICENSE
 ├── README.md
 ├── README.ja.md
