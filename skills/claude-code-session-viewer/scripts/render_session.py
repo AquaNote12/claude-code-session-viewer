@@ -3,7 +3,8 @@
 
 Usage:
   render_session.py list [--all] [--limit N] [--project DIR] [--current-session SESSION] [--lang ja|en]
-  render_session.py render SESSION [--out PATH] [--no-subagents] [--lang ja|en]
+  render_session.py render SESSION [--out PATH] [--no-subagents] [--no-tools] [--no-thinking] [--lang ja|en]
+  render_session.py open PATH
 
 SESSION is a session ID (a unique prefix is enough) or a path to a JSONL file.
 When --lang is omitted, the language is taken from the OS locale, falling back to English.
@@ -15,6 +16,7 @@ import argparse
 import datetime as dt
 import os
 import sys
+import webbrowser
 from pathlib import Path
 
 # Make the ccsv package importable even when Python runs with -I / -P or PYTHONSAFEPATH,
@@ -22,7 +24,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from ccsv.i18n import SUPPORTED_LANGS, detect_lang, set_lang, t  # noqa: E402
-from ccsv.render import render_page  # noqa: E402
+from ccsv.render import filter_items, render_page  # noqa: E402
 from ccsv.transcript import (  # noqa: E402
     Builder, SessionLookupError, all_session_files, peek_session, project_dir_name, resolve_session,
 )
@@ -73,7 +75,7 @@ def cmd_render(args):
     except SessionLookupError as e:
         sys.exit(str(e))
     builder = Builder(path, include_subagents=not args.no_subagents)
-    items = builder.build()
+    items = filter_items(builder.build(), include_tools=not args.no_tools, include_thinking=not args.no_thinking)
     page, filename = render_page(builder, items)
     out = Path(args.out).expanduser() if args.out else DEFAULT_OUT_DIR / filename
     if out.is_dir():
@@ -84,6 +86,16 @@ def cmd_render(args):
     print(t("rendered", path=out))
     print(t("source", path=path))
     print(t("stats", n=n, kb=fmt_num(len(page.encode("utf-8")) // 1024)))
+    print(t("privacy_notice"))
+
+
+def cmd_open(args):
+    # The browser is started by Python, not by a shell command, so nothing in the path is interpreted.
+    path = Path(args.path).expanduser()
+    if path.suffix.lower() != ".html" or not path.is_file():
+        sys.exit(t("err_open", path=args.path))
+    webbrowser.open(path.resolve().as_uri())
+    print(t("opened", path=path))
 
 
 def build_parser():
@@ -103,7 +115,12 @@ def build_parser():
     rp.add_argument("session", help=t("cli_session"))
     rp.add_argument("--out", help=t("cli_out", path=DEFAULT_OUT_DIR))
     rp.add_argument("--no-subagents", action="store_true", help=t("cli_no_subagents"))
+    rp.add_argument("--no-tools", action="store_true", help=t("cli_no_tools"))
+    rp.add_argument("--no-thinking", action="store_true", help=t("cli_no_thinking"))
     rp.add_argument("--lang", choices=SUPPORTED_LANGS, help=lang_help)
+    op = sub.add_parser("open", help=t("cli_open"))
+    op.add_argument("path", help=t("cli_open_path"))
+    op.add_argument("--lang", choices=SUPPORTED_LANGS, help=lang_help)
     return ap
 
 
@@ -115,10 +132,7 @@ def main(argv=None):
     known, _ = pre_parser.parse_known_args(argv)
     set_lang(known.lang or detect_lang())
     args = build_parser().parse_args(argv)
-    if args.cmd == "list":
-        cmd_list(args)
-    else:
-        cmd_render(args)
+    {"list": cmd_list, "render": cmd_render, "open": cmd_open}[args.cmd](args)
 
 
 if __name__ == "__main__":

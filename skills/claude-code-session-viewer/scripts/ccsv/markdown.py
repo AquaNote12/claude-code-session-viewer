@@ -22,11 +22,11 @@ def md_inline(text):
 
     text = INLINE_CODE_RE.sub(lambda m: keep("<code>%s</code>" % esc(m.group(1))), text)
     text = LINK_RE.sub(
-        lambda m: keep('<a href="%s" target="_blank" rel="noopener">%s</a>' % (esc(m.group(2)), esc(m.group(1)))),
+        lambda m: keep('<a href="%s" target="_blank" rel="noopener noreferrer">%s</a>' % (esc(m.group(2)), esc(m.group(1)))),
         text,
     )
     text = AUTOLINK_RE.sub(
-        lambda m: keep('<a href="%s" target="_blank" rel="noopener">%s</a>' % (esc(m.group(1)), esc(m.group(1)))),
+        lambda m: keep('<a href="%s" target="_blank" rel="noopener noreferrer">%s</a>' % (esc(m.group(1)), esc(m.group(1)))),
         text,
     )
     text = esc(text)

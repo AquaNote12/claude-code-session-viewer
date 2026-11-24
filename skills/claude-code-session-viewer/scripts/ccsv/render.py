@@ -11,7 +11,9 @@ Do not write these placeholder forms anywhere else in the assets (not even in co
 they would be substituted too.
 """
 
+import base64
 import datetime as dt
+import hashlib
 import json
 import re
 from pathlib import Path
@@ -36,12 +38,50 @@ JS_MESSAGE_KEYS = ("show_full", "collapse", "toast_downloaded", "toast_copied", 
 PLACEHOLDER_RE = re.compile(r"\{\{(t:[a-z_]+|[A-Z_]+)\}\}")
 
 
+INLINE_SCRIPT_RE = re.compile(r"<script>(.*?)</script>", re.S)
+
+
 def load_template():
-    """page.html with style.css and app.js inlined, placeholders still unfilled."""
+    """page.html with style.css and app.js inlined, placeholders still unfilled.
+
+    Also returns the CSP source ("sha256-...") of the inline script. The page's Content-Security-Policy
+    allows only that exact script to run, so markup that slipped through escaping could not run code.
+    """
     page = (ASSETS_DIR / "page.html").read_text(encoding="utf-8")
     style = (ASSETS_DIR / "style.css").read_text(encoding="utf-8").rstrip("\n")
     script = (ASSETS_DIR / "app.js").read_text(encoding="utf-8").rstrip("\n")
-    return page.replace("/*{{STYLE}}*/", style).replace("/*{{SCRIPT}}*/", script)
+    page = page.replace("/*{{STYLE}}*/", style).replace("/*{{SCRIPT}}*/", script)
+    inline = INLINE_SCRIPT_RE.search(page).group(1)
+    digest = base64.b64encode(hashlib.sha256(inline.encode("utf-8")).digest()).decode("ascii")
+    return page, "sha256-" + digest
+
+
+def safe_filename_part(text, limit):
+    """Keep letters, digits, "_", "-" and "."; replace everything else with "_".
+
+    The title comes from the transcript, so it must not be able to put shell metacharacters ($, `, ;, ', ...)
+    or path separators into the file name that Claude later passes to a command.
+    """
+    s = re.sub(r"[^\w.-]+", "_", text or "")
+    s = re.sub(r"_{2,}", "_", s).strip("._-")[:limit].rstrip("._-")
+    return s or "session"
+
+
+def filter_items(items, include_tools=True, include_thinking=True):
+    """Leave tool calls and/or thinking out of the page. Bubbles left with nothing to show are dropped."""
+    if include_tools and include_thinking:
+        return items
+    out = []
+    for it in items:
+        if it["kind"] == "assistant":
+            parts = [p for p in it["parts"]
+                     if not (p["type"] == "tool" and not include_tools)
+                     and not (p["type"] == "thinking" and not include_thinking)]
+            if not parts:
+                continue
+            it = dict(it, parts=parts)
+        out.append(it)
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -134,6 +174,8 @@ def tool_result_html(result):
                 src = image_src(b)
                 if src:
                     parts.append('<img class="shot" src="%s" alt="%s" loading="lazy">' % (esc(src), esc(t("tool_result_image"))))
+                else:
+                    parts.append('<span class="chip">%s</span>' % esc(t("image")))
             else:
                 parts.append(pre(json.dumps(b, ensure_ascii=False)[:2000]))
         return "".join(parts)
@@ -355,13 +397,17 @@ def render_page(builder, items):
                                                                  for model, u in builder.usage_by_model.items())))
         facts_html += "".join('<div class="wide"><dt>%s</dt><dd>%s</dd></div>' % (esc(k), v) for k, v in wide)
     # The language is part of the name so that the Japanese and English pages of a session do not overwrite each other.
-    filename = re.sub(r"[\\/:*?\"<>|\s]+", "_", title).strip("_")[:60] + "_%s_%s.html" % (m["session_id"][:8], get_lang())
+    filename = "%s_%s_%s.html" % (safe_filename_part(title, 60), safe_filename_part(m["session_id"][:8], 8), get_lang())
     generated = dt.datetime.now().astimezone().strftime("%Y-%m-%d %H:%M")
+    notes = [t("facts_note")] if has_usage(total) else []
+    notes.append(t("facts_privacy"))
+    template, script_hash = load_template()
     values = {
         "LANG": esc(get_lang()),
         "TITLE": esc(title),
+        "SCRIPT_HASH": script_hash,
         "FACTS": facts_html,
-        "FACTS_NOTE": '<p class="facts-note">%s</p>' % esc(t("facts_note")) if has_usage(total) else "",
+        "FACTS_NOTE": "".join('<p class="facts-note">%s</p>' % esc(n) for n in notes),
         "TOC": "".join(toc),
         "BODY": body,
         "FOOTER": esc(t("footer", time=generated)),
@@ -375,5 +421,5 @@ def render_page(builder, items):
         return values.get(key, mo.group(0))
 
     # Replace everything in one pass, so "{{...}}" inside the transcript is never substituted.
-    page = PLACEHOLDER_RE.sub(fill, load_template())
+    page = PLACEHOLDER_RE.sub(fill, template)
     return page, filename

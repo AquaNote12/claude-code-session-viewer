@@ -127,13 +127,31 @@ def tag_value(text, tag):
     return m.group(1).strip() if m else ""
 
 
+SAFE_IMAGE_TYPES = ("image/png", "image/jpeg", "image/gif", "image/webp")
+BASE64_RE = re.compile(r"[A-Za-z0-9+/=\s]+")
+HTTP_URL_RE = re.compile(r"https?://", re.I)
+
+
 def image_src(block):
-    src = block.get("source") or {}
-    if src.get("type") == "base64" and src.get("data"):
-        return "data:%s;base64,%s" % (src.get("media_type", "image/png"), src["data"])
-    if src.get("type") == "url":
-        return src.get("url")
-    return None
+    """A data: URL for an embedded image, or None.
+
+    Only base64 images of common raster types are embedded. Images given by URL are not loaded:
+    the page must not contact other servers when it is opened (that would tell them it was viewed).
+    """
+    src = block.get("source")
+    if not isinstance(src, dict) or src.get("type") != "base64":
+        return None
+    data, media_type = src.get("data"), src.get("media_type", "image/png")
+    if media_type not in SAFE_IMAGE_TYPES or not isinstance(data, str) or not BASE64_RE.fullmatch(data):
+        return None
+    return "data:%s;base64,%s" % (media_type, re.sub(r"\s+", "", data))
+
+
+def link_html(url):
+    """A link for http(s) URLs; anything else (e.g. javascript:) is shown as plain text."""
+    if HTTP_URL_RE.match(url):
+        return '<a href="%s" target="_blank" rel="noopener noreferrer">%s</a>' % (esc(url), esc(url))
+    return esc(url)
 
 
 # ---------------------------------------------------------------------------
@@ -282,11 +300,9 @@ class Builder:
                     self._on_system(rec, ts)
                 elif kind == "pr-link":
                     url = rec.get("prUrl")
-                    if url and url not in self.meta["prs"]:
+                    if isinstance(url, str) and url and url not in self.meta["prs"]:
                         self.meta["prs"].append(url)
-                        self.add_system(ts, t("pr_linked"),
-                                        '<a href="%s" target="_blank" rel="noopener">%s</a>' % (esc(url), esc(url)),
-                                        body_is_html=True)
+                        self.add_system(ts, t("pr_linked"), link_html(url), body_is_html=True)
             except Exception as e:  # one unreadable record must not stop the whole page
                 self.add_system(ts, t("record_error", error=type(e).__name__), level="warn")
         self.close_assistant()
