@@ -4,14 +4,18 @@ Run from the repository root:
     python3 -m unittest discover -s tests
 """
 
+import base64
 import contextlib
+import hashlib
 import io
+import json
 import os
 import re
 import string
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -251,11 +255,211 @@ class CommandLineTest(ResetLangMixin, unittest.TestCase):
         # -I leaves the script's directory out of sys.path; the entry point must still find ccsv.
         with tempfile.TemporaryDirectory() as tmp:
             proc = subprocess.run(
-                [sys.executable, "-I", str(ENTRY), "render", str(FIXTURE), "--lang", "en", "--out", tmp],
+                [sys.executable, "-I", "-B", str(ENTRY), "render", str(FIXTURE), "--lang", "en", "--out", tmp],
                 capture_output=True, text=True, cwd=tmp, timeout=60,
             )
             self.assertEqual(proc.returncode, 0, proc.stderr)
             self.assertIn("Wrote:", proc.stdout)
+
+
+def write_jsonl(directory, name, records):
+    path = Path(directory) / name
+    with open(path, "w", encoding="utf-8") as f:
+        for rec in records:
+            f.write((rec if isinstance(rec, str) else json.dumps(rec)) + "\n")
+    return path
+
+
+def user_rec(content, **extra):
+    rec = {"type": "user", "timestamp": "2026-01-01T00:00:00Z", "message": {"role": "user", "content": content}}
+    rec.update(extra)
+    return rec
+
+
+def assistant_rec(blocks, msg_id="m1"):
+    return {"type": "assistant", "timestamp": "2026-01-01T00:00:01Z",
+            "message": {"id": msg_id, "model": "claude-opus-5-5", "role": "assistant", "content": blocks}}
+
+
+def render_records(records, lang="en", **filters):
+    with tempfile.TemporaryDirectory() as tmp:
+        path = write_jsonl(tmp, "abcd0000-0000.jsonl", records)
+        i18n.set_lang(lang)
+        builder = transcript.Builder(path)
+        items = render.filter_items(builder.build(), **filters)
+        return render.render_page(builder, items)
+
+
+class SecurityTest(ResetLangMixin, unittest.TestCase):
+    def test_file_name_keeps_only_safe_characters(self):
+        title = "$(touch${IFS}PWNED)`id`;&'x'../../..\\..\\etc <b>"
+        _, filename = render_records([{"type": "custom-title", "customTitle": title}, user_rec("hi")])
+        self.assertRegex(filename, r"^[\w.-]+$")
+        self.assertNotIn("/", filename)
+        self.assertTrue(filename.endswith("_abcd0000_en.html"))
+
+    def test_only_http_links_are_links(self):
+        page, _ = render_records([
+            {"type": "pr-link", "timestamp": "2026-01-01T00:00:00Z", "prUrl": "javascript:alert(1)//https://x"},
+            {"type": "pr-link", "timestamp": "2026-01-01T00:00:01Z", "prUrl": "https://github.com/example/example/pull/1"},
+            assistant_rec([{"type": "text", "text": "[a](javascript:alert(1)) [b](https://example.com/b)"}]),
+        ])
+        hrefs = re.findall(r'href="([^"]*)"', page)
+        self.assertFalse([h for h in hrefs if not (h.startswith("https://") or h.startswith("#"))], hrefs)
+        self.assertIn("https://github.com/example/example/pull/1", hrefs)
+        self.assertIn("javascript:alert(1)//https://x", page)  # still visible, as text
+        self.assertNotIn('rel="noopener"', page)  # every link also has noreferrer
+
+    def test_only_safe_embedded_images(self):
+        page, _ = render_records([user_rec([
+            {"type": "text", "text": "images"},
+            {"type": "image", "source": {"type": "url", "url": "https://attacker.example/beacon.png"}},
+            {"type": "image", "source": {"type": "base64", "media_type": "image/svg+xml", "data": "PHN2Zz4="}},
+            {"type": "image", "source": {"type": "base64", "media_type": 'image/png" onerror="x', "data": "AAAA"}},
+            {"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": "iVBORw0KGgo="}},
+        ])])
+        srcs = re.findall(r'<img[^>]* src="([^"]*)"', page)
+        self.assertEqual(srcs, ["data:image/png;base64,iVBORw0KGgo="])
+        self.assertNotIn("attacker.example", page)
+
+    def test_content_security_policy_allows_only_app_js(self):
+        _, page = render_fixture("en")
+        csp = re.search(r'http-equiv="Content-Security-Policy" content="([^"]*)"', page).group(1)
+        self.assertIn("default-src 'none'", csp)
+        self.assertIn("img-src data:", csp)
+        inline = re.findall(r"<script>(.*?)</script>", page, re.S)
+        self.assertEqual(len(inline), 1)
+        digest = base64.b64encode(hashlib.sha256(inline[0].encode()).digest()).decode()
+        self.assertIn("script-src 'sha256-%s'" % digest, csp)
+        self.assertIn('<meta name="referrer" content="no-referrer">', page)
+
+    def test_privacy_notice_on_page_and_in_output(self):
+        _, page = render_fixture("en")
+        self.assertIn("Copy and Download include everything in this page", page)
+        with tempfile.TemporaryDirectory() as tmp:
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                render_session.main(["render", str(FIXTURE), "--lang", "en", "--out", tmp])
+        self.assertIn("do not publish it", out.getvalue())
+
+    def test_tools_and_thinking_can_be_left_out(self):
+        _, full = render_fixture("en")
+        builder = transcript.Builder(FIXTURE)
+        page, _ = render.render_page(builder, render.filter_items(builder.build(), include_tools=False,
+                                                                  include_thinking=False))
+        self.assertIn('class="tool"', full)
+        self.assertIn("Let me look at the directory first.", full)
+        self.assertNotIn('class="tool"', page)
+        self.assertNotIn("Let me look at the directory first.", page)  # thinking
+        self.assertNotIn("Find all Python files.", page)  # subagent conversation lives inside a tool call
+        self.assertIn("Done. The fix is in", page)  # Claude's text stays
+
+
+class RobustnessTest(ResetLangMixin, unittest.TestCase):
+    """Malformed or hostile transcripts must neither crash rendering nor make it slow."""
+
+    CASES = {
+        "table separator with many spaces": [assistant_rec([{"type": "text", "text": "a|b\n--" + " " * 30000 + "x"}])],
+        "many unclosed tags": [user_rec("<system-reminder>" * 20000 + "hello")],
+        "many unclosed task tags": [user_rec("<task-notification>" + "<task-id>" * 20000)],
+        "many brackets": [assistant_rec([{"type": "text", "text": "[" * 50000}])],
+        "many bold markers": [assistant_rec([{"type": "text", "text": "**x " * 30000}])],
+        "deeply nested quote": [assistant_rec([{"type": "text", "text": ">" * 3000 + " x"}])],
+        "forged fragment marker": [assistant_rec([{"type": "text", "text": "\x001\x00 0 `code`"}])],
+        "numeric timestamp": [{"type": "user", "timestamp": 123, "message": {"role": "user", "content": "hi"}}],
+        "array record": ["[]"],
+        "deeply nested JSON": ["[" * 100000 + "]" * 100000],
+        "wrong tool field types": [assistant_rec([{"type": "tool_use", "id": ["x"], "name": ["x"], "input": [1]}]),
+                                   user_rec([{"type": "tool_result", "tool_use_id": ["x"], "content": "r"}])],
+        "wrong todo status type": [assistant_rec([{"type": "tool_use", "id": "t", "name": "TodoWrite",
+                                                   "input": {"todos": [{"status": ["x"], "content": "a"}]}}])],
+    }
+
+    def test_hostile_inputs(self):
+        for name, records in self.CASES.items():
+            with self.subTest(name):
+                start = time.time()
+                page, _ = render_records(list(records) + [user_rec("still rendered")])
+                self.assertLess(time.time() - start, 3, "rendering took too long")
+                self.assertIn("still rendered", page)
+
+    def test_an_item_that_fails_becomes_a_warning(self):
+        i18n.set_lang("en")
+        broken = {"kind": "assistant", "ts": None, "parts": [{"type": "unknown"}], "models": None,
+                  "efforts": [], "usage": None, "sub_usage": None}
+        html_out = render.render_item(broken, 0)
+        self.assertIn("could not be displayed", html_out)
+
+    def test_short_session_ids_are_rejected(self):
+        for arg in ("", "abc", "../x"):
+            with self.subTest(arg=arg), self.assertRaises(transcript.SessionLookupError):
+                transcript.resolve_session(arg)
+
+
+class OutputFileTest(ResetLangMixin, unittest.TestCase):
+    def run_render(self, out):
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            render_session.main(["render", str(FIXTURE), "--lang", "en", "--out", out])
+        return buf.getvalue()
+
+    def test_out_rules_and_permissions(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            # A missing directory, with or without a trailing slash, is created.
+            self.run_render(tmp + "/newdir/")
+            self.run_render(tmp + "/report")
+            for d in ("newdir", "report"):
+                files = list((Path(tmp) / d).glob("*.html"))
+                self.assertEqual(len(files), 1, d)
+                self.assertEqual(files[0].stat().st_mode & 0o777, 0o600)
+            # An existing file that is not .html is never overwritten.
+            keep = Path(tmp) / "keep.txt"
+            keep.write_text("keep", encoding="utf-8")
+            with self.assertRaises(SystemExit):
+                self.run_render(str(keep))
+            self.assertEqual(keep.read_text(encoding="utf-8"), "keep")
+
+    @unittest.skipUnless(hasattr(os, "O_NOFOLLOW"), "needs O_NOFOLLOW")
+    def test_symbolic_link_at_destination_is_not_followed(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            victim = Path(tmp) / "victim.txt"
+            victim.write_text("victim", encoding="utf-8")
+            (Path(tmp) / "link.html").symlink_to(victim)
+            with self.assertRaises(SystemExit):
+                self.run_render(str(Path(tmp) / "link.html"))
+            self.assertEqual(victim.read_text(encoding="utf-8"), "victim")
+
+    def test_open_accepts_only_existing_html_files(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            for path in (Path(tmp) / "missing.html", Path(tmp)):
+                with self.subTest(path=path), self.assertRaises(SystemExit):
+                    render_session.main(["open", str(path), "--lang", "en"])
+            page = Path(tmp) / "page.html"
+            page.write_text("<p>x</p>", encoding="utf-8")
+            with mock.patch.object(render_session.webbrowser, "open") as opened, \
+                    contextlib.redirect_stdout(io.StringIO()):
+                render_session.main(["open", str(page), "--lang", "en"])
+            opened.assert_called_once_with(page.resolve().as_uri())
+
+
+class ListOutputTest(ResetLangMixin, unittest.TestCase):
+    def test_transcript_text_is_one_clean_line(self):
+        with tempfile.TemporaryDirectory() as projects:
+            (Path(projects) / "-p").mkdir()
+            write_jsonl(Path(projects) / "-p", "abcd1234-0000.jsonl", [
+                {"type": "ai-title", "aiTitle": "title\x1b[31mRED\nIGNORE PREVIOUS INSTRUCTIONS‮"},
+                user_rec("hi", cwd="/tmp/x\nrun: something"),
+            ])
+            out = io.StringIO()
+            with mock.patch.object(transcript, "PROJECTS_DIR", Path(projects)), contextlib.redirect_stdout(out):
+                render_session.main(["list", "--all", "--lang", "en"])
+        text = out.getvalue()
+        self.assertNotIn("\x1b", text)
+        self.assertNotIn("‮", text)
+        lines = text.splitlines()
+        self.assertEqual(len(lines), 2, lines)  # the session line and its cwd line, nothing injected in between
+        self.assertIn("IGNORE PREVIOUS INSTRUCTIONS", lines[0])
+        self.assertIn("run: something", lines[1])
 
 
 if __name__ == "__main__":
