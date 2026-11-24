@@ -342,6 +342,53 @@ class SecurityTest(ResetLangMixin, unittest.TestCase):
                 render_session.main(["render", str(FIXTURE), "--lang", "en", "--out", tmp])
         self.assertIn("do not publish it", out.getvalue())
 
+    def test_documented_items_stay_with_no_tools_and_no_thinking(self):
+        # README ("Privacy and sharing") lists what these options do NOT remove; every item is checked here,
+        # so the list cannot silently become wrong. One record per documented item, each with a marker.
+        png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+        records = [
+            {"type": "custom-title", "customTitle": "MARK_TITLE"},
+            user_rec([{"type": "text", "text": "<ide_selection>The user selected the lines 1 to 2 from /tmp/MARK_SEL.py:\nx</ide_selection>"
+                                               "MARK_USER_MESSAGE"},
+                      {"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": png}},
+                      {"type": "document", "title": "MARK_DOCUMENT_TITLE",
+                       "source": {"type": "base64", "media_type": "application/pdf", "data": "MARK_DOCUMENT_DATA"}}],
+                     cwd="/tmp/MARK_CWD", gitBranch="MARK_BRANCH"),
+            assistant_rec([{"type": "thinking", "thinking": "MARK_THINKING_GONE"},
+                           {"type": "tool_use", "id": "t1", "name": "Bash", "input": {"command": "MARK_TOOL_GONE"}},
+                           {"type": "text", "text": "MARK_CLAUDE_REPLY"}]),
+            user_rec("<command-name>/MARK_SLASH</command-name><command-args>MARK_ARGS</command-args>"),
+            user_rec("<local-command-stdout>MARK_COMMAND_OUTPUT</local-command-stdout>"),
+            user_rec("<task-notification><task-id>x</task-id><status>completed</status>"
+                     "<result>MARK_TASK_RESULT</result></task-notification>"),
+            {"type": "attachment", "timestamp": "2026-01-01T00:00:02Z", "attachment": {
+                "type": "hook_success", "hookName": "PreToolUse:Bash", "exitCode": 0, "stdout": "", "stderr": "MARK_HOOK"}},
+            user_rec([{"type": "text", "text": "Base directory for this skill: /tmp/s\n\nMARK_SKILL_BODY"}], isMeta=True),
+            {"type": "attachment", "timestamp": "2026-01-01T00:00:03Z",
+             "attachment": {"type": "edited_text_file", "filename": "/tmp/MARK_EDITED.py"}},
+            {"type": "attachment", "timestamp": "2026-01-01T00:00:03Z",
+             "attachment": {"type": "file", "filename": "/tmp/MARK_ATTACHED.md"}},
+            {"type": "attachment", "timestamp": "2026-01-01T00:00:04Z",
+             "attachment": {"type": "plan_mode_exit", "planFilePath": "/tmp/MARK_PLAN.md"}},
+            {"type": "assistant", "timestamp": "2026-01-01T00:00:05Z", "isApiErrorMessage": True,
+             "message": {"id": "e", "model": "<synthetic>", "content": [{"type": "text", "text": "MARK_API_ERROR"}]}},
+            user_rec("Summary: MARK_COMPACT_SUMMARY", isCompactSummary=True),
+            {"type": "pr-link", "timestamp": "2026-01-01T00:00:06Z", "prUrl": "https://github.com/example/MARK_PR/pull/1"},
+        ]
+        page, _ = render_records(records, include_tools=False, include_thinking=False)
+        kept = ["MARK_TITLE", "/tmp/MARK_CWD", "MARK_BRANCH", "abcd0000-0000",   # session details
+                "MARK_USER_MESSAGE", 'src="data:image/png;base64,', "MARK_CLAUDE_REPLY",  # the conversation
+                "MARK_COMMAND_OUTPUT", "MARK_TASK_RESULT", "MARK_HOOK", "MARK_SKILL_BODY", "MARK_SEL.py",
+                "MARK_COMPACT_SUMMARY", "MARK_SLASH", "MARK_ARGS", "MARK_EDITED.py", "MARK_ATTACHED.md",
+                "MARK_PLAN.md", "MARK_API_ERROR", "MARK_PR"]
+        for marker in kept:
+            with self.subTest(kept=marker):
+                self.assertIn(marker, page)
+        self.assertIn("MARK_DOCUMENT_TITLE", page)  # the title of an attached document (its data is never shown)
+        for marker in ("MARK_THINKING_GONE", "MARK_TOOL_GONE", "MARK_DOCUMENT_DATA"):
+            with self.subTest(removed=marker):
+                self.assertNotIn(marker, page)
+
     def test_tools_and_thinking_can_be_left_out(self):
         _, full = render_fixture("en")
         builder = transcript.Builder(FIXTURE)
