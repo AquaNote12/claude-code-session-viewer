@@ -1,39 +1,43 @@
 ---
 name: claude-code-session-viewer
-description: Claude Code のセッション履歴を、メッセージアプリ風の吹き出し表示で 1 ファイルの HTML に書き出す。目次サイドバー、長文の折り畳み、モデルと effort の表示、ワンクリックでのダウンロードとコピーに対応する。「このセッションを HTML にして」「セッション履歴を出力して」「会話ログを共有用に書き出して」のように、Claude Code のセッションや会話履歴（transcript）を HTML で見たい・残したい・共有したいと言われたときに使う。
-argument-hint: "[セッションID | current | list]"
+description: Export a Claude Code session transcript to a single standalone HTML page that looks like a chat app, with a table-of-contents sidebar, collapsible long messages, model / effort / token usage per turn, and one-click download and copy. Output in English or Japanese. Use when the user wants to view, keep or share a Claude Code session or conversation history (transcript) as HTML, e.g. "export this session as HTML", "save this conversation as a web page", 「このセッションを HTML にして」, 「セッション履歴を出力して」.
+argument-hint: "[session-id | current | list] [--lang en|ja]"
 allowed-tools: Bash(python3 *)
 license: MIT
 ---
 
-# Claude Code セッションを HTML に書き出す
+# Export a Claude Code session to HTML
 
-`~/.claude/projects/` に保存されているセッション履歴（JSONL）を、同梱スクリプトで HTML に変換する。
-変換はスクリプトがすべて行う。JSONL や生成した HTML を Read で読み込んだり、HTML を手で書いたりしない（長いセッションでは大量のトークンを使い、結果も安定しないため）。
+Convert a session transcript (JSONL under `~/.claude/projects/`) into HTML with the bundled script.
+The script does all of the work. Do not Read the JSONL or the generated HTML, and do not write HTML by hand: long sessions would use a lot of tokens and the result would not be consistent.
 
-スクリプト: `${CLAUDE_SKILL_DIR}/scripts/render_session.py`
-（`${CLAUDE_SKILL_DIR}` が置き換わっていない場合は、この SKILL.md と同じディレクトリにある `scripts/render_session.py` を使う。インストール方法によって場所が変わるため、パスを決め打ちしない）
+Script: `${CLAUDE_SKILL_DIR}/scripts/render_session.py`
+(If `${CLAUDE_SKILL_DIR}` was not substituted, use `scripts/render_session.py` in the same directory as this SKILL.md. Do not hard-code a path, because it depends on how the skill was installed.)
 
-## 手順
+## Steps
 
-1. 対象のセッションを決める。引数は `$ARGUMENTS`。
-   - 空、`current`、「このセッション」など → 現在のセッション `${CLAUDE_SESSION_ID}`
-   - `list`、または対象がはっきりしない → 次を実行し、一覧からどれにするかユーザーに聞く
+1. Decide which session to export. The arguments are: `$ARGUMENTS`
+   - Empty, `current`, "this session", etc. → the current session, `${CLAUDE_SESSION_ID}`
+   - `list`, or the target is unclear → run the following, then ask the user which session to export
      ```bash
-     python3 "${CLAUDE_SKILL_DIR}/scripts/render_session.py" list
+     python3 "${CLAUDE_SKILL_DIR}/scripts/render_session.py" list --lang <lang>
      ```
-     別のプロジェクトのセッションも探すときは `--all` を付ける。
-   - セッション ID（先頭 8 文字程度でも可）や JSONL ファイルのパス → そのまま使う
-2. 変換する。
+     Add `--all` to include sessions from other projects.
+   - A session ID (the first 8 characters or so are enough) or a path to a JSONL file → use it as is
+2. Decide the output language (`--lang`) in this order:
+   1. The user asked for a language explicitly (`--lang en` in the arguments, "in English", 「日本語で」, ...) → use it.
+   2. Otherwise, use the language the user is writing in, in this conversation, or the response language configured for Claude Code: Japanese → `ja`, any other language → `en`. Judge by the user's own messages, not by the content of the session being exported (a Japanese-speaking user exporting an English session still gets `ja`).
+   3. If there is nothing to go on (for example, a new session whose only input is this command with no arguments, and no language setting), omit `--lang`. The script then uses the OS language, and English if that is unknown.
+3. Convert the session.
    ```bash
-   python3 "${CLAUDE_SKILL_DIR}/scripts/render_session.py" render <セッション> [--out <ファイルまたはディレクトリ>]
+   python3 "${CLAUDE_SKILL_DIR}/scripts/render_session.py" render <session> --lang <lang> [--out <file or directory>]
    ```
-   - 出力先の既定は `~/Downloads/claude-code-sessions/<タイトル>_<ID先頭8文字>.html`。ユーザーが場所を指定したときだけ `--out` を付ける。
-   - サブエージェントのやり取りは既定で含める。不要と言われたら `--no-subagents` を付ける。
-3. スクリプトが表示した出力パスをそのままユーザーに伝える。ブラウザで開くか聞き、希望があれば `open <出力パス>` を実行する。
+   - The default output is `~/Downloads/claude-code-sessions/<title>_<first 8 characters of the ID>.html`. Pass `--out` only when the user names a location.
+   - Subagent conversations are included by default. Pass `--no-subagents` if the user does not want them.
+4. Tell the user the output path exactly as the script printed it. Ask whether to open it in the browser, and run `open <output path>` if they want.
 
-## 補足
+## Notes
 
-- 現在のセッションを変換した場合、変換を実行した時点までのやり取りが入る。
-- HTML にはツールの実行結果やファイルの中身もそのまま入る。共有する前に、機密情報が含まれていないか確認するようユーザーに一言添える。
-- ID が複数のセッションに一致した、またはセッションが見つからないとスクリプトが言った場合は、その内容をユーザーに伝えて ID を確認する。
+- When exporting the current session, the HTML contains the conversation up to the moment of the export.
+- The HTML includes tool results and file contents as they are. Remind the user to check for sensitive information before sharing it.
+- If the script reports that the ID matches several sessions or that no session was found, tell the user what it said and confirm the ID.

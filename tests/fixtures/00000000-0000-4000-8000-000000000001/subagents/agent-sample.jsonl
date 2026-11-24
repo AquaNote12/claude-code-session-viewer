@@ -1,0 +1,2 @@
+{"type": "user", "timestamp": "2026-01-01T00:00:11.000Z", "isSidechain": true, "message": {"role": "user", "content": "Find all Python files."}}
+{"type": "assistant", "timestamp": "2026-01-01T00:00:15.000Z", "isSidechain": true, "effort": "medium", "message": {"id": "sub_1", "model": "claude-haiku-5-5", "role": "assistant", "usage": {"input_tokens": 5, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 200, "output_tokens": 20}, "content": [{"type": "text", "text": "Found app.py"}]}}

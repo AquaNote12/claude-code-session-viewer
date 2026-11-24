@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
-"""Claude Code のセッション履歴 (JSONL) を、単体で開ける HTML に変換する。
+"""Convert a Claude Code session transcript (JSONL) into a standalone HTML page.
 
-使い方:
-  render_session.py list [--all] [--limit N] [--project DIR]
-  render_session.py render SESSION [--out PATH] [--no-subagents]
+Usage:
+  render_session.py list [--all] [--limit N] [--project DIR] [--lang ja|en]
+  render_session.py render SESSION [--out PATH] [--no-subagents] [--lang ja|en]
 
-SESSION にはセッション ID（先頭一致可）か JSONL ファイルのパスを渡す。
-Python 3.9 以上の標準ライブラリだけで動く。
+SESSION is a session ID (a unique prefix is enough) or a path to a JSONL file.
+When --lang is omitted, the language is taken from the OS locale, falling back to English.
+Requires only the Python 3.9+ standard library.
 """
 
 import argparse
@@ -15,6 +16,7 @@ import html
 import json
 import os
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -22,19 +24,327 @@ CLAUDE_DIR = Path(os.environ.get("CLAUDE_CONFIG_DIR") or (Path.home() / ".claude
 PROJECTS_DIR = CLAUDE_DIR / "projects"
 DEFAULT_OUT_DIR = Path.home() / "Downloads" / "claude-code-sessions"
 
-LONG_CHARS = 900          # これを超えるメッセージは折り畳み対象
+LONG_CHARS = 900          # messages longer than this are collapsible
 LONG_LINES = 18
-LONG_TOOLS = 4            # ツール呼び出しがこれ以上ある Claude メッセージも折り畳み対象
+LONG_TOOLS = 4            # Claude messages with at least this many tool calls are collapsible too
 SUMMARY_CHARS = 160
 TOC_CHARS = 48
-RESULT_MAX_CHARS = 30000  # ツール結果 1 件あたりの表示上限
+RESULT_MAX_CHARS = 30000  # display limit per tool result
 SUBAGENT_MAX_DEPTH = 2
 
 ANSI_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
 
 
 # ---------------------------------------------------------------------------
-# 汎用ユーティリティ
+# Localization
+# ---------------------------------------------------------------------------
+# Every user-visible string lives here. Each language must define the same keys with the
+# same {placeholders} (tests/test_render_session.py checks this).
+# A key with the suffix "_one" is used instead of the base key when n == 1 (English plurals).
+
+SUPPORTED_LANGS = ("en", "ja")
+DEFAULT_LANG = "en"
+
+MESSAGES = {
+    "en": {
+        # CLI
+        "cli_description": "Convert Claude Code session transcripts into HTML.",
+        "cli_list": "list sessions",
+        "cli_all": "list sessions from all projects",
+        "cli_project": "list sessions of this directory (default: current directory)",
+        "cli_limit": "maximum number of sessions to list",
+        "cli_render": "convert a session into HTML",
+        "cli_session": "session ID (a unique prefix is enough) or path to a JSONL file",
+        "cli_out": "output file or directory (default: {path})",
+        "cli_no_subagents": "do not include subagent conversations",
+        "cli_lang": "language of the output (default: from the OS locale, otherwise English)",
+        "err_not_found": "Session not found: {arg} (searched under {dir})",
+        "err_ambiguous": "The ID matches more than one session. Please give a longer ID:",
+        "list_fallback": "(No sessions found for {dir}; listing all projects instead)",
+        "untitled": "(untitled)",
+        "rendered": "Wrote: {path}",
+        "source": "Source session: {path}",
+        "stats": "Messages: {n} / Size: {kb} KB",
+        # Token usage
+        "usage": "Output {output} · Input {input}",
+        "usage_with_breakdown": "Output {output} · Input {input} (incl. {breakdown})",
+        "usage_cache_read": "cache read {n}",
+        "usage_cache_write": "cache write {n}",
+        "usage_separator": ", ",
+        "unknown_model": "unknown",
+        # Notes attached to user prompts
+        "ide_opened_file": "File open in the IDE",
+        "ide_selection": "Selection in the IDE",
+        "ide_selection_range": "Selection in the IDE: {file}:{start}-{end}",
+        # System rows and events
+        "pr_linked": "Linked to a pull request",
+        "record_error": "This record could not be displayed ({error})",
+        "compact_summary": "Summary of the conversation so far (given to Claude after compaction)",
+        "skill_loaded": "Loaded skill: {name}",
+        "command_run": "Command: {command}",
+        "command_output": "Command output",
+        "interrupted": "Interrupted by the user",
+        "document": "Document",
+        "task_notification": "Background task notification",
+        "task_notification_status": "Background task notification ({status})",
+        "task_notification_summary": "{label}: {summary}",
+        "api_error": "API error",
+        "sent_while_working": "Sent while Claude was working",
+        "user_edited_file": "File edited by the user: {file}",
+        "file_attached": "Attached file: {file}",
+        "plan_mode_enter": "Entered plan mode",
+        "plan_mode_exit": "Exited plan mode",
+        "auto_mode_enter": "Entered auto mode",
+        "auto_mode_exit": "Exited auto mode",
+        "plan_file": "Plan file: {path}",
+        "hook_event": "Hook {name} (exit code {code})",
+        "compacted": "Conversation compacted",
+        "compacted_trigger": "Conversation compacted ({trigger})",
+        "compacted_trigger_tokens": "Conversation compacted ({trigger}, {tokens} tokens before)",
+        "trigger_manual": "manual",
+        "trigger_auto": "automatic",
+        # Tool calls
+        "todo_update": "Updated to-dos",
+        "written_content": "Written content ({n} lines)",
+        "written_content_one": "Written content (1 line)",
+        "subagent_prompt": "Instructions to the subagent",
+        "tool_result_image": "Image from a tool result",
+        "no_result": "No result",
+        "error": "Error",
+        "result": "Result",
+        "result_lines": "Result ({n} lines)",
+        "result_lines_one": "Result (1 line)",
+        "error_details": "Error details",
+        "error_details_lines": "Error details ({n} lines)",
+        "error_details_lines_one": "Error details (1 line)",
+        "subagent_thread": "Subagent conversation ({type}, {n} messages)",
+        "subagent_thread_one": "Subagent conversation ({type}, 1 message)",
+        "subagent_thread_usage": "Subagent conversation ({type}, {n} messages, {usage})",
+        "subagent_thread_usage_one": "Subagent conversation ({type}, 1 message, {usage})",
+        "tools_summary": "Tools: {tools}",
+        # Messages
+        "image_placeholder": "[image]",
+        "code_placeholder": "[code]",
+        "no_text": "(no text)",
+        "you": "You",
+        "attached_image": "Attached image",
+        "image": "Image",
+        "attachment": "Attachment: {name}",
+        "thinking": "Thinking ({n} characters)",
+        "thinking_one": "Thinking (1 character)",
+        "summary_label": "Summary",
+        "show_full": "Show all",
+        "collapse": "Collapse",
+        "turn_tokens": "Tokens: {usage}",
+        "turn_tokens_with_subagents": "Tokens: {usage} / of which subagents: {sub}",
+        "truncated": "… Truncated after {limit} characters ({total} characters in total)",
+        # Page
+        "default_title": "Claude Code session {id}",
+        "fact_session_id": "Session ID",
+        "fact_cwd": "Working directory",
+        "fact_branch": "Branch",
+        "fact_period": "Period",
+        "period": "{start} – {end}",
+        "fact_models": "Models",
+        "fact_messages": "Messages",
+        "messages_count": "You: {user} / Claude: {assistant}",
+        "fact_tokens_total": "Total tokens (including subagents)",
+        "fact_tokens_subagents": "Of which subagents",
+        "fact_tokens_by_model": "By model",
+        "facts_note": ("Token counts are the sum of the API calls recorded in the transcript. Output includes thinking. "
+                       "Calls made internally by Claude Code, such as title generation and compaction, are not included."),
+        "btn_toc": "Contents",
+        "btn_toc_title": "Show or hide the table of contents",
+        "toc": "Contents",
+        "btn_expand": "Expand all",
+        "btn_collapse": "Collapse long messages",
+        "btn_tools": "Tools",
+        "btn_thinking": "Thinking",
+        "btn_system": "System",
+        "btn_copy": "Copy",
+        "btn_copy_title": "Copy this HTML to the clipboard",
+        "btn_download": "Download",
+        "btn_download_title": "Download this HTML",
+        "footer": "Generated by claude-code-session-viewer at {time}",
+        "toast_downloaded": "Downloaded",
+        "toast_copied": "Copied the HTML to the clipboard",
+        "toast_copy_failed": "Could not copy",
+    },
+    "ja": {
+        # CLI
+        "cli_description": "Claude Code のセッション履歴を HTML に変換する",
+        "cli_list": "セッションの一覧を表示する",
+        "cli_all": "全プロジェクトのセッションを表示する",
+        "cli_project": "このディレクトリのセッションを表示する（既定: カレントディレクトリ）",
+        "cli_limit": "表示するセッションの最大数",
+        "cli_render": "セッションを HTML に変換する",
+        "cli_session": "セッション ID（先頭一致可）または JSONL ファイルのパス",
+        "cli_out": "出力先のファイルまたはディレクトリ（既定: {path}）",
+        "cli_no_subagents": "サブエージェントのやり取りを含めない",
+        "cli_lang": "出力の言語（既定: OS の言語設定。判定できなければ英語）",
+        "err_not_found": "セッションが見つかりません: {arg}（{dir} 配下を検索しました）",
+        "err_ambiguous": "ID が複数のセッションに一致しました。もっと長く指定してください:",
+        "list_fallback": "（{dir} のセッションが無いため、全プロジェクトを表示します）",
+        "untitled": "(タイトルなし)",
+        "rendered": "出力しました: {path}",
+        "source": "元のセッション: {path}",
+        "stats": "メッセージ {n} 件 / {kb} KB",
+        # Token usage
+        "usage": "出力 {output} ・ 入力 {input}",
+        "usage_with_breakdown": "出力 {output} ・ 入力 {input}（うち{breakdown}）",
+        "usage_cache_read": "キャッシュ読込 {n}",
+        "usage_cache_write": "キャッシュ作成 {n}",
+        "usage_separator": " ・ ",
+        "unknown_model": "不明",
+        # Notes attached to user prompts
+        "ide_opened_file": "IDE で開いていたファイル",
+        "ide_selection": "IDE で選択した範囲",
+        "ide_selection_range": "IDE で選択した範囲: {file}:{start}-{end}",
+        # System rows and events
+        "pr_linked": "Pull Request と紐付きました",
+        "record_error": "このレコードは表示できませんでした ({error})",
+        "compact_summary": "これまでの会話の要約（圧縮後に Claude へ渡された内容）",
+        "skill_loaded": "Skill を読み込み: {name}",
+        "command_run": "コマンド実行: {command}",
+        "command_output": "コマンドの出力",
+        "interrupted": "ユーザーが処理を中断しました",
+        "document": "ドキュメント",
+        "task_notification": "バックグラウンドタスク通知",
+        "task_notification_status": "バックグラウンドタスク通知（{status}）",
+        "task_notification_summary": "{label}: {summary}",
+        "api_error": "API エラー",
+        "sent_while_working": "Claude の作業中に送信",
+        "user_edited_file": "ユーザーがファイルを編集: {file}",
+        "file_attached": "ファイルを添付: {file}",
+        "plan_mode_enter": "プランモードに入りました",
+        "plan_mode_exit": "プランモードを終了しました",
+        "auto_mode_enter": "オートモードに入りました",
+        "auto_mode_exit": "オートモードを終了しました",
+        "plan_file": "プランファイル: {path}",
+        "hook_event": "フック {name}（終了コード {code}）",
+        "compacted": "会話を圧縮しました",
+        "compacted_trigger": "会話を圧縮しました（{trigger}）",
+        "compacted_trigger_tokens": "会話を圧縮しました（{trigger}・圧縮前 {tokens} トークン）",
+        "trigger_manual": "手動",
+        "trigger_auto": "自動",
+        # Tool calls
+        "todo_update": "ToDo を更新",
+        "written_content": "書き込んだ内容（{n} 行）",
+        "subagent_prompt": "サブエージェントへの指示",
+        "tool_result_image": "ツール結果の画像",
+        "no_result": "結果なし",
+        "error": "エラー",
+        "result": "結果",
+        "result_lines": "結果（{n} 行）",
+        "error_details": "エラー内容",
+        "error_details_lines": "エラー内容（{n} 行）",
+        "subagent_thread": "サブエージェントのやり取り（{type}・{n} 件）",
+        "subagent_thread_usage": "サブエージェントのやり取り（{type}・{n} 件・{usage}）",
+        "tools_summary": "ツール {tools}",
+        # Messages
+        "image_placeholder": "[画像]",
+        "code_placeholder": "[コード]",
+        "no_text": "（テキストなし）",
+        "you": "あなた",
+        "attached_image": "添付画像",
+        "image": "画像",
+        "attachment": "添付: {name}",
+        "thinking": "思考（{n} 文字）",
+        "summary_label": "概要",
+        "show_full": "全文を表示",
+        "collapse": "折り畳む",
+        "turn_tokens": "トークン: {usage}",
+        "turn_tokens_with_subagents": "トークン: {usage} ／ うちサブエージェント: {sub}",
+        "truncated": "… 長いため {limit} 文字以降を省略しました（全 {total} 文字）",
+        # Page
+        "default_title": "Claude Code セッション {id}",
+        "fact_session_id": "セッション ID",
+        "fact_cwd": "作業ディレクトリ",
+        "fact_branch": "ブランチ",
+        "fact_period": "期間",
+        "period": "{start} 〜 {end}",
+        "fact_models": "モデル",
+        "fact_messages": "メッセージ数",
+        "messages_count": "あなた {user} 件 / Claude {assistant} 件",
+        "fact_tokens_total": "トークン合計（サブエージェントを含む）",
+        "fact_tokens_subagents": "うちサブエージェント",
+        "fact_tokens_by_model": "モデル別",
+        "facts_note": ("トークン数は履歴に記録された API 呼び出しの合計です。出力には思考を含みます。"
+                       "タイトルの自動生成や会話の圧縮など、Claude Code が内部で行う呼び出しは含みません。"),
+        "btn_toc": "目次",
+        "btn_toc_title": "目次の表示を切り替え",
+        "toc": "目次",
+        "btn_expand": "すべて展開",
+        "btn_collapse": "長文を折り畳む",
+        "btn_tools": "ツール",
+        "btn_thinking": "思考",
+        "btn_system": "システム",
+        "btn_copy": "コピー",
+        "btn_copy_title": "この HTML をクリップボードにコピー",
+        "btn_download": "ダウンロード",
+        "btn_download_title": "この HTML をダウンロード",
+        "footer": "claude-code-session-viewer で {time} に生成",
+        "toast_downloaded": "ダウンロードしました",
+        "toast_copied": "HTML をクリップボードにコピーしました",
+        "toast_copy_failed": "コピーできませんでした",
+    },
+}
+
+# Strings the page's JavaScript needs at runtime (embedded as JSON).
+JS_MESSAGE_KEYS = ("show_full", "collapse", "toast_downloaded", "toast_copied", "toast_copy_failed")
+
+_lang = DEFAULT_LANG
+
+
+def set_lang(lang):
+    global _lang
+    _lang = lang if lang in MESSAGES else DEFAULT_LANG
+
+
+def get_lang():
+    return _lang
+
+
+def t(key, **kw):
+    """Look up a message in the current language and fill in its placeholders."""
+    table = MESSAGES[_lang]
+    if kw.get("n") == 1 and key + "_one" in table:
+        key += "_one"
+    template = table.get(key) or MESSAGES[DEFAULT_LANG][key]
+    return template.format(**kw)
+
+
+def lang_from_locale_name(name):
+    """Map a locale name such as "ja_JP.UTF-8" or "en-US" to a supported language, or None."""
+    name = (name or "").strip().strip('"').lower()
+    if not name or name in ("c", "posix") or name.startswith(("c.", "posix.")):
+        return None  # these do not name a language
+    return "ja" if name.startswith("ja") else "en"
+
+
+def detect_lang():
+    """Language used when --lang is not given: OS locale first, then English."""
+    for var in ("LC_ALL", "LC_MESSAGES", "LANG"):
+        lang = lang_from_locale_name(os.environ.get(var))
+        if lang:
+            return lang
+    if sys.platform == "darwin":
+        # macOS apps often run with LANG unset or set to C; read the system language instead.
+        try:
+            out = subprocess.run(["defaults", "read", "-g", "AppleLanguages"],
+                                 capture_output=True, text=True, timeout=3).stdout
+            m = re.search(r'"?([A-Za-z]{2,3}(?:[-_][A-Za-z0-9]+)*)"?', out.replace("(", " "))
+            if m:
+                lang = lang_from_locale_name(m.group(1))
+                if lang:
+                    return lang
+        except (OSError, subprocess.SubprocessError):
+            pass
+    return DEFAULT_LANG
+
+
+# ---------------------------------------------------------------------------
+# General helpers
 # ---------------------------------------------------------------------------
 
 def esc(s):
@@ -50,10 +360,14 @@ def parse_ts(s):
         return None
 
 
-def fmt_ts(t, with_date=False):
-    if t is None:
+def fmt_ts(ts, with_date=False):
+    if ts is None:
         return ""
-    return t.strftime("%Y-%m-%d %H:%M:%S" if with_date else "%H:%M:%S")
+    return ts.strftime("%Y-%m-%d %H:%M:%S" if with_date else "%H:%M:%S")
+
+
+def fmt_num(n):
+    return format(n, ",")
 
 
 def one_line(s, limit):
@@ -62,8 +376,8 @@ def one_line(s, limit):
 
 
 def strip_markdown(s):
-    """概要表示用に Markdown 記号をざっくり落とす。"""
-    s = re.sub(r"```.*?```", " [コード] ", s or "", flags=re.S)
+    """Roughly remove Markdown syntax so the text can be used as a summary."""
+    s = re.sub(r"```.*?```", " %s " % t("code_placeholder"), s or "", flags=re.S)
     s = re.sub(r"`([^`]*)`", r"\1", s)
     s = re.sub(r"!\[[^\]]*\]\([^)]*\)", "", s)
     s = re.sub(r"\[([^\]]+)\]\([^)]*\)", r"\1", s)
@@ -88,7 +402,7 @@ def load_jsonl(path):
 
 
 # ---------------------------------------------------------------------------
-# 最小限の Markdown レンダラ（外部ライブラリなし。入力は必ずエスケープする）
+# Minimal Markdown renderer (no external libraries; input is always escaped)
 # ---------------------------------------------------------------------------
 
 INLINE_CODE_RE = re.compile(r"`([^`\n]+)`")
@@ -134,13 +448,13 @@ def split_row(line):
 
 
 def render_list(lines):
-    """インデントに応じて入れ子にした ul/ol を作る。"""
+    """Build ul/ol elements, nested according to indentation."""
     out = []
-    stack = []  # (indent, tag)。li は開いたままにしておき、次の項目か入れ子の終わりで閉じる
+    stack = []  # (indent, tag). An li stays open until the next item or the end of its nested list.
     for raw in lines:
         m = LIST_RE.match(raw)
         if not m:
-            # 継続行は開いている項目に足す
+            # A continuation line belongs to the item that is still open.
             if stack:
                 out.append("<br>" + md_inline(raw.strip()))
             continue
@@ -202,7 +516,7 @@ def md_to_html(src):
         h = re.match(r"^(#{1,6})\s+(.*)$", stripped)
         if h:
             flush_para()
-            level = min(len(h.group(1)) + 2, 6)  # 吹き出し内なので h3 以下に落とす
+            level = min(len(h.group(1)) + 2, 6)  # inside a bubble, so start at h3
             out.append("<h%d>%s</h%d>" % (level, md_inline(h.group(2)), level))
             i += 1
             continue
@@ -227,13 +541,13 @@ def md_to_html(src):
             while i < len(lines) and "|" in lines[i] and lines[i].strip():
                 rows.append(split_row(lines[i]))
                 i += 1
-            t = ['<div class="table-wrap"><table><thead><tr>']
-            t += ["<th>%s</th>" % md_inline(c) for c in head]
-            t.append("</tr></thead><tbody>")
+            parts = ['<div class="table-wrap"><table><thead><tr>']
+            parts += ["<th>%s</th>" % md_inline(c) for c in head]
+            parts.append("</tr></thead><tbody>")
             for r in rows:
-                t.append("<tr>%s</tr>" % "".join("<td>%s</td>" % md_inline(c) for c in r))
-            t.append("</tbody></table></div>")
-            out.append("".join(t))
+                parts.append("<tr>%s</tr>" % "".join("<td>%s</td>" % md_inline(c) for c in r))
+            parts.append("</tbody></table></div>")
+            out.append("".join(parts))
             continue
         if LIST_RE.match(line):
             flush_para()
@@ -259,14 +573,14 @@ def pre(text, cls=""):
     text = ANSI_RE.sub("", text or "")
     note = ""
     if len(text) > RESULT_MAX_CHARS:
-        note = '<div class="trunc">… 長いため %s 文字以降を省略しました（全 %s 文字）</div>' % (
-            format(RESULT_MAX_CHARS, ","), format(len(text), ","))
+        note = '<div class="trunc">%s</div>' % esc(t("truncated", limit=fmt_num(RESULT_MAX_CHARS),
+                                                      total=fmt_num(len(text))))
         text = text[:RESULT_MAX_CHARS]
     return '<pre class="%s">%s</pre>%s' % (esc(cls), esc(text), note)
 
 
 # ---------------------------------------------------------------------------
-# セッションファイルの探索
+# Finding session files
 # ---------------------------------------------------------------------------
 
 def all_session_files():
@@ -285,18 +599,18 @@ def resolve_session(arg):
         return p
     hits = [f for f in all_session_files() if f.stem.startswith(arg)]
     if not hits:
-        sys.exit("セッションが見つかりません: %s（%s 配下を検索しました）" % (arg, PROJECTS_DIR))
+        sys.exit(t("err_not_found", arg=arg, dir=PROJECTS_DIR))
     exact = [f for f in hits if f.stem == arg]
     if exact:
         hits = exact
     if len(hits) > 1:
         lines = "\n".join("  %s" % f for f in hits[:10])
-        sys.exit("ID が複数のセッションに一致しました。もっと長く指定してください:\n" + lines)
+        sys.exit(t("err_ambiguous") + "\n" + lines)
     return hits[0]
 
 
 def peek_session(path):
-    """一覧表示用に、タイトルと最初のユーザー発言だけを拾う。"""
+    """Read just the title and the first user prompt, for the session list."""
     title = custom = first = None
     cwd = None
     try:
@@ -308,14 +622,14 @@ def peek_session(path):
                     d = json.loads(line)
                 except json.JSONDecodeError:
                     continue
-                t = d.get("type")
-                if t == "custom-title":
+                kind = d.get("type")
+                if kind == "custom-title":
                     custom = d.get("customTitle")
-                elif t == "ai-title":
+                elif kind == "ai-title":
                     title = d.get("aiTitle")
                 if cwd is None and d.get("cwd"):
                     cwd = d["cwd"]
-                if first is None and t == "user" and not d.get("isMeta") and not d.get("isCompactSummary"):
+                if first is None and kind == "user" and not d.get("isMeta") and not d.get("isCompactSummary"):
                     texts = user_texts(d)
                     text = clean_prompt_text(" ".join(texts))[0]
                     if text.strip():
@@ -333,18 +647,18 @@ def cmd_list(args):
         if scoped:
             files = scoped
         else:
-            print("（%s のセッションが無いため、全プロジェクトを表示します）" % (args.project or os.getcwd()))
+            print(t("list_fallback", dir=args.project or os.getcwd()))
     files.sort(key=lambda f: f.stat().st_mtime, reverse=True)
     for f in files[: args.limit]:
         title, first, cwd = peek_session(f)
         mtime = dt.datetime.fromtimestamp(f.stat().st_mtime).strftime("%Y-%m-%d %H:%M")
-        print("%s  %s  %s" % (f.stem, mtime, one_line(title or first or "(タイトルなし)", 60)))
+        print("%s  %s  %s" % (f.stem, mtime, one_line(title or first or t("untitled"), 60)))
         if args.all or cwd:
             print("    cwd: %s" % (cwd or f.parent.name))
 
 
 # ---------------------------------------------------------------------------
-# JSONL → 表示用アイテム
+# JSONL records -> display items
 # ---------------------------------------------------------------------------
 
 def user_texts(rec):
@@ -361,19 +675,20 @@ PROMPT_TAG_RE = re.compile(r"<(ide_opened_file|ide_selection|system-reminder)>(.
 
 
 def clean_prompt_text(text):
-    """IDE などが差し込むタグを本文から外し、(本文, 補足リスト) を返す。"""
+    """Remove tags injected by the IDE and others; return (text, notes)."""
     notes = []
 
     def take(m):
         tag, body = m.group(1), m.group(2).strip()
         if tag == "ide_opened_file":
             fm = re.search(r"opened the file (.+?) in the IDE", body)
-            notes.append(("IDE で開いていたファイル", fm.group(1) if fm else body, False))
+            notes.append((t("ide_opened_file"), fm.group(1) if fm else body, False))
         elif tag == "ide_selection":
             fm = re.search(r"selected the lines (\d+) to (\d+) from (.+?):", body)
-            label = "IDE で選択した範囲"
             if fm:
-                label += ": %s:%s-%s" % (fm.group(3), fm.group(1), fm.group(2))
+                label = t("ide_selection_range", file=fm.group(3), start=fm.group(1), end=fm.group(2))
+            else:
+                label = t("ide_selection")
             notes.append((label, body, True))
         return ""
 
@@ -395,7 +710,7 @@ def add_usage(dst, src):
 
 
 def usage_from_api(u):
-    """API の usage を、表示用の 4 項目にまとめる。"""
+    """Reduce an API usage object to the four numbers we display."""
     def n(key):
         v = u.get(key)
         return v if isinstance(v, int) else 0
@@ -412,16 +727,16 @@ def has_usage(u):
 
 
 def fmt_usage(u, detail=False):
-    """例: 出力 2,345 ・ 入力 45,678（うちキャッシュ読込 44,000）"""
-    s = "出力 %s ・ 入力 %s" % (format(u["output"], ","), format(usage_input(u), ","))
-    inner = []
+    """e.g. "Output 2,345 · Input 45,678 (incl. cache read 44,000)"."""
+    breakdown = []
     if u["cache_read"]:
-        inner.append("キャッシュ読込 %s" % format(u["cache_read"], ","))
+        breakdown.append(t("usage_cache_read", n=fmt_num(u["cache_read"])))
     if detail and u["cache_create"]:
-        inner.append("キャッシュ作成 %s" % format(u["cache_create"], ","))
-    if inner:
-        s += "（うち%s）" % " ・ ".join(inner)
-    return s
+        breakdown.append(t("usage_cache_write", n=fmt_num(u["cache_create"])))
+    if breakdown:
+        return t("usage_with_breakdown", output=fmt_num(u["output"]), input=fmt_num(usage_input(u)),
+                 breakdown=t("usage_separator").join(breakdown))
+    return t("usage", output=fmt_num(u["output"]), input=fmt_num(usage_input(u)))
 
 
 def tag_value(text, tag):
@@ -430,14 +745,14 @@ def tag_value(text, tag):
 
 
 class Builder:
-    """レコードを順に読んで、吹き出し・システム行のリストを作る。"""
+    """Read records in order and turn them into a list of bubbles and system rows."""
 
     def __init__(self, session_path, include_subagents=True, depth=0):
         self.path = Path(session_path)
         self.records = load_jsonl(self.path)
         self.items = []
         self.tools = {}           # tool_use_id -> part
-        self.current = None       # 組み立て中の Claude 吹き出し
+        self.current = None       # Claude bubble being assembled
         self.mode_state = {}
         self.seen_tasks = set()
         self.include_subagents = include_subagents
@@ -445,11 +760,12 @@ class Builder:
         self.subagents = self._index_subagents() if include_subagents and depth < SUBAGENT_MAX_DEPTH else {}
         self.meta = {"title": None, "custom_title": None, "cwd": None, "branch": None, "version": None,
                      "session_id": self.path.stem, "start": None, "end": None, "models": [], "prs": []}
-        # トークン数。1 つの応答が複数レコードに分かれて同じ usage を持つので、message.id で重複を除く
+        # Token usage. One response is split across several records that carry the same usage,
+        # so each message.id is counted once.
         self.seen_usage_ids = set()
-        self.usage = new_usage()          # このスレッド自身の分
-        self.sub_usage = new_usage()      # 配下のサブエージェントの分（入れ子も含む）
-        self.usage_by_model = {}          # サブエージェントの分も含めたモデル別
+        self.usage = new_usage()          # this thread only
+        self.sub_usage = new_usage()      # subagents below this thread (including nested ones)
+        self.usage_by_model = {}          # per model, including subagents
 
     def total_usage(self):
         return add_usage(add_usage(new_usage(), self.usage), self.sub_usage)
@@ -457,7 +773,7 @@ class Builder:
     def _count_usage(self, model, usage, bubble):
         add_usage(self.usage, usage)
         add_usage(bubble["usage"], usage)
-        add_usage(self.usage_by_model.setdefault(model or "不明", new_usage()), usage)
+        add_usage(self.usage_by_model.setdefault(model or t("unknown_model"), new_usage()), usage)
 
     def _attach_subagent(self, part, bubble):
         jsonl, _ = part["subagent"]
@@ -470,7 +786,7 @@ class Builder:
         for model, u in sub.usage_by_model.items():
             add_usage(self.usage_by_model.setdefault(model, new_usage()), u)
 
-    # --- サブエージェント ----------------------------------------------------
+    # --- subagents ------------------------------------------------------------
     def _index_subagents(self):
         result = {}
         sub_dir = self.path.with_suffix("") / "subagents"
@@ -486,7 +802,7 @@ class Builder:
                 result[meta["toolUseId"]] = (jsonl, meta)
         return result
 
-    # --- 吹き出しの管理 ------------------------------------------------------
+    # --- bubbles --------------------------------------------------------------
     def close_assistant(self):
         if self.current and self.current["parts"]:
             self.items.append(self.current)
@@ -504,7 +820,7 @@ class Builder:
                            "body_is_html": body_is_html, "level": level, "fold": fold})
 
     def add_event(self, ts, label, body=None, fold=True):
-        """Claude 吹き出しの中に入れる小さなイベント（Skill 読み込みなど）。"""
+        """A small event shown inside a Claude bubble (e.g. a skill being loaded)."""
         self.assistant(ts)["parts"].append({"type": "event", "label": label, "body": body, "fold": fold})
 
     def add_user(self, ts, text, notes, attachments, tag=None):
@@ -512,61 +828,60 @@ class Builder:
         self.items.append({"kind": "user", "ts": ts, "text": text, "notes": notes,
                            "attachments": attachments, "tag": tag})
 
-    # --- メイン処理 ----------------------------------------------------------
+    # --- main loop ------------------------------------------------------------
     def build(self):
         for rec in self.records:
             self._collect_meta(rec)
-            t = rec.get("type")
+            kind = rec.get("type")
             ts = parse_ts(rec.get("timestamp"))
             try:
-                if t == "user":
+                if kind == "user":
                     self._on_user(rec, ts)
-                elif t == "assistant":
+                elif kind == "assistant":
                     self._on_assistant(rec, ts)
-                elif t == "attachment":
+                elif kind == "attachment":
                     self._on_attachment(rec, ts)
-                elif t == "system":
+                elif kind == "system":
                     self._on_system(rec, ts)
-                elif t == "pr-link":
+                elif kind == "pr-link":
                     url = rec.get("prUrl")
                     if url and url not in self.meta["prs"]:
                         self.meta["prs"].append(url)
-                        self.add_system(ts, "Pull Request と紐付きました",
+                        self.add_system(ts, t("pr_linked"),
                                         '<a href="%s" target="_blank" rel="noopener">%s</a>' % (esc(url), esc(url)),
                                         body_is_html=True)
-            except Exception as e:  # 1 レコードの解釈失敗で全体を止めない
-                self.add_system(ts, "このレコードは表示できませんでした (%s)" % type(e).__name__, level="warn")
+            except Exception as e:  # one unreadable record must not stop the whole page
+                self.add_system(ts, t("record_error", error=type(e).__name__), level="warn")
         self.close_assistant()
         return self.items
 
     def _collect_meta(self, rec):
         m = self.meta
-        t = rec.get("type")
-        if t == "ai-title" and rec.get("aiTitle"):
+        kind = rec.get("type")
+        if kind == "ai-title" and rec.get("aiTitle"):
             m["title"] = rec["aiTitle"]
-        elif t == "custom-title" and rec.get("customTitle"):
+        elif kind == "custom-title" and rec.get("customTitle"):
             m["custom_title"] = rec["customTitle"]
         for key, field in (("cwd", "cwd"), ("branch", "gitBranch"), ("version", "version")):
             if rec.get(field):
                 m[key] = rec[field]
-        if t in ("user", "assistant"):
+        if kind in ("user", "assistant"):
             ts = parse_ts(rec.get("timestamp"))
             if ts:
                 m["start"] = m["start"] or ts
                 m["end"] = ts
 
-    # --- user レコード -------------------------------------------------------
+    # --- user records ---------------------------------------------------------
     def _on_user(self, rec, ts):
         msg = rec.get("message") or {}
         content = msg.get("content")
         if rec.get("isCompactSummary"):
             text = content if isinstance(content, str) else "\n".join(user_texts(rec))
-            self.add_system(ts, "これまでの会話の要約（圧縮後に Claude へ渡された内容）",
-                            md_to_html(text), body_is_html=True, fold=True)
+            self.add_system(ts, t("compact_summary"), md_to_html(text), body_is_html=True, fold=True)
             return
         blocks = content if isinstance(content, list) else [{"type": "text", "text": content or ""}]
 
-        # ツール結果
+        # Tool results
         results = [b for b in blocks if isinstance(b, dict) and b.get("type") == "tool_result"]
         for b in results:
             part = self.tools.get(b.get("tool_use_id"))
@@ -583,27 +898,26 @@ class Builder:
             if joined.startswith("Base directory for this skill"):
                 first = joined.split("\n", 1)[0]
                 name = first.rsplit("/", 1)[-1]
-                self.add_event(ts, "Skill を読み込み: %s" % name, md_to_html(joined))
-            return  # それ以外のメタ情報（画像パス注記、ローカルコマンドの注意書きなど）は出さない
+                self.add_event(ts, t("skill_loaded", name=name), md_to_html(joined))
+            return  # other meta records (image path notes, local command caveats, ...) are not shown
 
         if not joined and not any(isinstance(b, dict) and b.get("type") in ("image", "document") for b in blocks):
             return
         if joined.startswith("<command-name>") or joined.startswith("<command-message>"):
-            name = tag_value(joined, "command-name")
-            cmd_args = tag_value(joined, "command-args")
-            self.add_system(ts, "コマンド実行: %s %s" % (name, cmd_args), level="command")
+            command = ("%s %s" % (tag_value(joined, "command-name"), tag_value(joined, "command-args"))).strip()
+            self.add_system(ts, t("command_run", command=command), level="command")
             return
         if joined.startswith("<local-command-stdout>") or joined.startswith("<local-command-stderr>"):
             out = tag_value(joined, "local-command-stdout") or tag_value(joined, "local-command-stderr")
             if out:
-                self.add_system(ts, "コマンドの出力", pre(out), body_is_html=True, level="command",
+                self.add_system(ts, t("command_output"), pre(out), body_is_html=True, level="command",
                                 fold=len(out) > 400)
             return
         if joined.startswith("<task-notification>"):
             self._task_notification(joined, ts)
             return
         if re.fullmatch(r"\[Request interrupted by user[^\]]*\]", joined):
-            self.add_system(ts, "ユーザーが処理を中断しました", level="warn")
+            self.add_system(ts, t("interrupted"), level="warn")
             return
 
         text, notes = clean_prompt_text(joined)
@@ -614,9 +928,9 @@ class Builder:
             if b.get("type") == "image":
                 attachments.append(("image", image_src(b)))
             elif b.get("type") == "document":
-                attachments.append(("document", b.get("title") or "ドキュメント"))
+                attachments.append(("document", b.get("title") or t("document")))
         if not text and not attachments:
-            # IDE 情報だけのメッセージは補足として残す
+            # A message that only carries IDE context is kept as a note.
             for label, body, _ in notes:
                 self.add_system(ts, label, pre(body) if body else None, body_is_html=True, fold=True)
             return
@@ -630,18 +944,18 @@ class Builder:
         status = tag_value(text, "status")
         summary = tag_value(text, "summary")
         result = tag_value(text, "result")
-        label = "バックグラウンドタスク通知%s" % ("（%s）" % status if status else "")
+        label = t("task_notification_status", status=status) if status else t("task_notification")
         if summary:
-            label += ": " + one_line(summary, 120)
+            label = t("task_notification_summary", label=label, summary=one_line(summary, 120))
         body = md_to_html(result) if result else None
         self.add_system(ts, label, body, body_is_html=True, level="task", fold=True)
 
-    # --- assistant レコード --------------------------------------------------
+    # --- assistant records ----------------------------------------------------
     def _on_assistant(self, rec, ts):
         msg = rec.get("message") or {}
         if rec.get("isApiErrorMessage"):
             text = "\n".join(b.get("text", "") for b in msg.get("content") or [] if isinstance(b, dict))
-            self.add_system(ts, "API エラー", pre(text), body_is_html=True, level="error")
+            self.add_system(ts, t("api_error"), pre(text), body_is_html=True, level="error")
             return
         bubble = self.assistant(ts)
         model = msg.get("model")
@@ -681,7 +995,7 @@ class Builder:
                 if part is not None:
                     part["result"] = b.get("content")
 
-    # --- attachment レコード -------------------------------------------------
+    # --- attachment records ---------------------------------------------------
     def _on_attachment(self, rec, ts):
         a = rec.get("attachment") or {}
         at = a.get("type")
@@ -696,51 +1010,50 @@ class Builder:
                 return
             text, notes = clean_prompt_text(text)
             if text:
-                self.add_user(ts, text, notes, [], tag="Claude の作業中に送信")
+                self.add_user(ts, text, notes, [], tag=t("sent_while_working"))
         elif at == "edited_text_file":
-            self.add_system(ts, "ユーザーがファイルを編集: %s" % a.get("filename", ""), level="note")
+            self.add_system(ts, t("user_edited_file", file=a.get("filename", "")), level="note")
         elif at == "file":
-            self.add_system(ts, "ファイルを添付: %s" % (a.get("displayPath") or a.get("filename", "")), level="note")
+            self.add_system(ts, t("file_attached", file=a.get("displayPath") or a.get("filename", "")), level="note")
         elif at in ("plan_mode", "auto_mode"):
             if not self.mode_state.get(at):
                 self.mode_state[at] = True
-                self.add_system(ts, {"plan_mode": "プランモードに入りました", "auto_mode": "オートモードに入りました"}[at],
-                                level="mode")
+                self.add_system(ts, t(at + "_enter"), level="mode")
         elif at in ("plan_mode_exit", "auto_mode_exit"):
             key = at[: -len("_exit")]
             if self.mode_state.get(key, True):
                 self.mode_state[key] = False
-                label = {"plan_mode": "プランモードを終了しました", "auto_mode": "オートモードを終了しました"}[key]
-                body = None
-                if a.get("planFilePath"):
-                    body = "プランファイル: %s" % a["planFilePath"]
-                self.add_system(ts, label, pre(body) if body else None, body_is_html=True, level="mode", fold=True)
-        elif at == "hook_success" or at == "hook_error" or at == "hook_blocking_error":
+                body = t("plan_file", path=a["planFilePath"]) if a.get("planFilePath") else None
+                self.add_system(ts, t(at), pre(body) if body else None, body_is_html=True, level="mode", fold=True)
+        elif at in ("hook_success", "hook_error", "hook_blocking_error"):
             stderr = (a.get("stderr") or "").strip()
             exit_code = a.get("exitCode")
             if stderr or (exit_code not in (None, 0)) or at != "hook_success":
                 body = "\n".join(x for x in (a.get("stdout", "").strip(), stderr) if x)
-                self.add_event(ts, "フック %s（終了コード %s）" % (a.get("hookName", ""), exit_code),
+                self.add_event(ts, t("hook_event", name=a.get("hookName", ""), code=exit_code),
                                pre(body) if body else None)
-        # それ以外（トークン残量の注記、ツール一覧の差分、環境情報など）は人が読んでも意味が薄いので出さない
+        # Everything else (remaining-token notes, tool list deltas, environment info, ...) means little
+        # to a human reader and is not shown.
 
-    # --- system レコード -----------------------------------------------------
+    # --- system records -------------------------------------------------------
     def _on_system(self, rec, ts):
         st = rec.get("subtype")
         content = rec.get("content") or ""
         if st == "compact_boundary":
             cm = rec.get("compactMetadata") or {}
-            trig = {"manual": "手動", "auto": "自動"}.get(cm.get("trigger"), cm.get("trigger") or "")
-            label = "会話を圧縮しました"
-            if trig:
-                label += "（%s" % trig
-                if cm.get("preTokens"):
-                    label += "・圧縮前 %s トークン" % format(cm["preTokens"], ",")
-                label += "）"
+            raw_trigger = cm.get("trigger")
+            trigger = {"manual": t("trigger_manual"), "auto": t("trigger_auto")}.get(raw_trigger, raw_trigger or "")
+            if trigger and cm.get("preTokens"):
+                label = t("compacted_trigger_tokens", trigger=trigger, tokens=fmt_num(cm["preTokens"]))
+            elif trigger:
+                label = t("compacted_trigger", trigger=trigger)
+            else:
+                label = t("compacted")
             self.add_system(ts, label, level="compact")
         elif st == "local_command":
             out = tag_value(content, "local-command-stdout") or tag_value(content, "local-command-stderr") or content
-            self.add_system(ts, "コマンドの出力", pre(out), body_is_html=True, level="command", fold=len(out) > 400)
+            self.add_system(ts, t("command_output"), pre(out), body_is_html=True, level="command",
+                            fold=len(out) > 400)
         elif st in ("informational", "api_error", "error", "warning") and content:
             self.add_system(ts, ANSI_RE.sub("", content), level="warn" if st != "informational" else "info")
 
@@ -755,7 +1068,7 @@ def image_src(block):
 
 
 # ---------------------------------------------------------------------------
-# HTML 生成
+# HTML generation
 # ---------------------------------------------------------------------------
 
 def tool_title(name, inp):
@@ -777,7 +1090,7 @@ def tool_title(name, inp):
     if name == "WebSearch":
         return g("query")
     if name == "TodoWrite":
-        return "ToDo を更新"
+        return t("todo_update")
     for k in ("description", "query", "url", "file_path", "path", "command", "prompt"):
         if g(k):
             return one_line(g(k), 90)
@@ -788,21 +1101,21 @@ def tool_input_html(name, inp, has_subagent=False):
     if name == "Bash" and isinstance(inp.get("command"), str):
         return pre("$ " + inp["command"], "cmd")
     if name == "Edit" and "old_string" in inp:
-        return ('<div class="diff">%s%s</div>' % (pre(inp.get("old_string", ""), "del"), pre(inp.get("new_string", ""), "add")))
+        return '<div class="diff">%s%s</div>' % (pre(inp.get("old_string", ""), "del"), pre(inp.get("new_string", ""), "add"))
     if name == "MultiEdit" and isinstance(inp.get("edits"), list):
         return "".join('<div class="diff">%s%s</div>' % (pre(e.get("old_string", ""), "del"), pre(e.get("new_string", ""), "add"))
                        for e in inp["edits"] if isinstance(e, dict))
     if name == "Write" and isinstance(inp.get("content"), str):
-        return fold_block("書き込んだ内容（%d 行）" % (inp["content"].count("\n") + 1), pre(inp["content"]))
+        return fold_block(t("written_content", n=inp["content"].count("\n") + 1), pre(inp["content"]))
     if name == "TodoWrite" and isinstance(inp.get("todos"), list):
         marks = {"completed": "☑", "in_progress": "▶", "pending": "☐"}
-        rows = "".join('<li class="todo-%s">%s %s</li>' % (esc(t.get("status")), marks.get(t.get("status"), "・"),
-                                                          esc(t.get("content") or t.get("activeForm") or ""))
-                       for t in inp["todos"] if isinstance(t, dict))
+        rows = "".join('<li class="todo-%s">%s %s</li>' % (esc(td.get("status")), marks.get(td.get("status"), "•"),
+                                                          esc(td.get("content") or td.get("activeForm") or ""))
+                       for td in inp["todos"] if isinstance(td, dict))
         return '<ul class="todos">%s</ul>' % rows
     if name in ("Agent", "Task") and isinstance(inp.get("prompt"), str):
-        # やり取りが残っていれば、指示はその最初の吹き出しとして表示される
-        return "" if has_subagent else fold_block("サブエージェントへの指示", md_to_html(inp["prompt"]))
+        # When the subagent's transcript exists, the prompt is shown as its first bubble instead.
+        return "" if has_subagent else fold_block(t("subagent_prompt"), md_to_html(inp["prompt"]))
     if name == "Read":
         extra = {k: v for k, v in inp.items() if k != "file_path"}
         return pre(json.dumps(extra, ensure_ascii=False)) if extra else ""
@@ -826,7 +1139,7 @@ def tool_result_html(result):
             elif b.get("type") == "image":
                 src = image_src(b)
                 if src:
-                    parts.append('<img class="shot" src="%s" alt="ツール結果の画像" loading="lazy">' % esc(src))
+                    parts.append('<img class="shot" src="%s" alt="%s" loading="lazy">' % (esc(src), esc(t("tool_result_image"))))
             else:
                 parts.append(pre(json.dumps(b, ensure_ascii=False)[:2000]))
         return "".join(parts)
@@ -851,23 +1164,26 @@ def render_tool(part, depth):
     title = tool_title(name, part["input"])
     status = ""
     if part["result"] is None:
-        status = '<span class="badge muted">結果なし</span>'
+        status = '<span class="badge muted">%s</span>' % esc(t("no_result"))
     elif part["is_error"]:
-        status = '<span class="badge err">エラー</span>'
+        status = '<span class="badge err">%s</span>' % esc(t("error"))
     body = [tool_input_html(name, part["input"], has_subagent=bool(part.get("subagent")))]
     if part["result"] is not None:
         n = result_text_len(part["result"])
-        label = ("エラー内容" if part["is_error"] else "結果") + ("（%d 行）" % n if n else "")
+        key = "error_details" if part["is_error"] else "result"
+        label = t(key + "_lines", n=n) if n else t(key)
         body.append(fold_block(label, tool_result_html(part["result"]), open_=part["is_error"], cls="result"))
     if part.get("sub_items") is not None:
         _, meta = part["subagent"]
         sub_items = part["sub_items"]
         n_msgs = sum(1 for it in sub_items if it["kind"] in ("user", "assistant"))
         inner = "".join(render_item(it, idx, depth=depth + 1) for idx, it in enumerate(sub_items))
-        label = "サブエージェントのやり取り（%s・%d 件" % (meta.get("agentType", "agent"), n_msgs)
+        agent_type = meta.get("agentType", "agent")
         if has_usage(part.get("sub_usage")):
-            label += "・" + fmt_usage(part["sub_usage"])
-        body.append(fold_block(label + "）", '<div class="subthread">%s</div>' % inner, cls="subagent"))
+            label = t("subagent_thread_usage", type=agent_type, n=n_msgs, usage=fmt_usage(part["sub_usage"]))
+        else:
+            label = t("subagent_thread", type=agent_type, n=n_msgs)
+        body.append(fold_block(label, '<div class="subthread">%s</div>' % inner, cls="subagent"))
     return ('<details class="tool"><summary><span class="tool-name">%s</span> <span class="tool-title">%s</span>%s</summary>'
             '<div class="tool-body">%s</div></details>') % (esc(name), esc(title), status, "".join(body))
 
@@ -879,28 +1195,28 @@ def summarize_tools(parts):
             counts[p["name"]] = counts.get(p["name"], 0) + 1
     if not counts:
         return ""
-    return "ツール " + ", ".join("%s×%d" % (k, v) if v > 1 else k for k, v in counts.items())
+    return t("tools_summary", tools=", ".join("%s×%d" % (k, v) if v > 1 else k for k, v in counts.items()))
 
 
 def item_summary(item):
-    """折り畳み時と目次に出す概要（機械的に作る）。"""
+    """Summary shown when a message is collapsed and in the table of contents (built mechanically)."""
     if item["kind"] == "user":
-        base = strip_markdown(item["text"]) or ("[画像]" if item["attachments"] else "")
+        base = strip_markdown(item["text"]) or (t("image_placeholder") if item["attachments"] else "")
         return one_line(base, SUMMARY_CHARS), ""
     texts = [p["text"] for p in item["parts"] if p["type"] == "text"]
-    # 最後のテキストが結論であることが多いので、それを概要にする
+    # The last text is usually the conclusion, so use it as the summary.
     base = strip_markdown(texts[-1]) if texts else ""
     tools = summarize_tools(item["parts"])
     if not base:
         events = [p["label"] for p in item["parts"] if p["type"] == "event"]
-        base = events[0] if events else "（テキストなし）"
+        base = events[0] if events else t("no_text")
     return one_line(base, SUMMARY_CHARS), tools
 
 
 def is_long(item):
     if item["kind"] == "user":
-        t = item["text"]
-        return len(t) > LONG_CHARS or t.count("\n") > LONG_LINES
+        text = item["text"]
+        return len(text) > LONG_CHARS or text.count("\n") > LONG_LINES
     texts = "\n".join(p["text"] for p in item["parts"] if p["type"] in ("text", "thinking"))
     tools = sum(1 for p in item["parts"] if p["type"] == "tool")
     return len(texts) > LONG_CHARS or texts.count("\n") > LONG_LINES or tools >= LONG_TOOLS
@@ -925,18 +1241,18 @@ def render_item(item, idx, depth=0):
     long_ = is_long(item)
     summary, tools = item_summary(item)
     if kind == "user":
-        who = "あなた"
+        who = t("you")
         meta_bits = []
         if item.get("tag"):
             meta_bits.append('<span class="badge">%s</span>' % esc(item["tag"]))
         content = [md_to_html(item["text"])] if item["text"] else []
-        for kind_, val in item["attachments"]:
-            if kind_ == "image" and val:
-                content.append('<img class="shot" src="%s" alt="添付画像" loading="lazy">' % esc(val))
-            elif kind_ == "image":
-                content.append('<span class="chip">画像</span>')
+        for att_kind, val in item["attachments"]:
+            if att_kind == "image" and val:
+                content.append('<img class="shot" src="%s" alt="%s" loading="lazy">' % (esc(val), esc(t("attached_image"))))
+            elif att_kind == "image":
+                content.append('<span class="chip">%s</span>' % esc(t("image")))
             else:
-                content.append('<span class="chip">添付: %s</span>' % esc(val))
+                content.append('<span class="chip">%s</span>' % esc(t("attachment", name=val)))
         for label, body, foldable in item["notes"]:
             if foldable and body:
                 content.append(fold_block(label, pre(body), cls="note"))
@@ -954,7 +1270,7 @@ def render_item(item, idx, depth=0):
             if p["type"] == "text":
                 content.append('<div class="md">%s</div>' % md_to_html(p["text"]))
             elif p["type"] == "thinking":
-                content.append(fold_block("思考（%d 文字）" % len(p["text"]), md_to_html(p["text"]), cls="thinking"))
+                content.append(fold_block(t("thinking", n=len(p["text"])), md_to_html(p["text"]), cls="thinking"))
             elif p["type"] == "tool":
                 content.append(render_tool(p, depth))
             elif p["type"] == "event":
@@ -966,35 +1282,37 @@ def render_item(item, idx, depth=0):
     cls = "msg %s" % kind
     if long_:
         cls += " long collapsed"
-        fold_html = ('<div class="msg-summary"><span class="sum-label">概要</span>%s%s</div>' % (
-            esc(summary), ' <span class="sum-tools">%s</span>' % esc(tools) if tools else ""))
-    toggle = '<button class="fold-btn" type="button" aria-expanded="false">全文を表示</button>' if long_ else ""
-    # アバターは Claude 側だけに付ける（ユーザー側は吹き出しのみ）
+        fold_html = ('<div class="msg-summary"><span class="sum-label">%s</span>%s%s</div>' % (
+            esc(t("summary_label")), esc(summary), ' <span class="sum-tools">%s</span>' % esc(tools) if tools else ""))
+    toggle = ('<button class="fold-btn" type="button" aria-expanded="false">%s</button>' % esc(t("show_full"))
+              if long_ else "")
+    # Only Claude's bubbles get an avatar; the user's bubbles stand on their own.
     avatar = "" if kind == "user" else '<div class="avatar">✳</div>'
     return ('<article class="%s"%s data-idx="%d">%s<div class="bubble">'
             '<header><span class="who">%s</span>%s<time>%s</time></header>%s<div class="msg-body">%s</div>%s%s'
             '</div></article>') % (
-        cls, anchor, idx, avatar, who, "".join(meta_bits), esc(ts),
+        cls, anchor, idx, avatar, esc(who), "".join(meta_bits), esc(ts),
         fold_html, "".join(content), turn_tokens_html(item), toggle)
 
 
 def turn_tokens_html(item):
-    """Claude の吹き出しの下に出すトークン数。サブエージェントの分は合計に含めて内訳を併記する。"""
+    """Token usage shown under a Claude bubble. Subagent usage is included in the total and also shown on its own."""
     if item["kind"] != "assistant":
         return ""
     own, sub = item.get("usage"), item.get("sub_usage")
     if not has_usage(own) and not has_usage(sub):
         return ""
     total = add_usage(add_usage(new_usage(), own), sub)
-    text = "トークン: " + fmt_usage(total)
     if has_usage(sub):
-        text += " ／ うちサブエージェント: " + fmt_usage(sub)
+        text = t("turn_tokens_with_subagents", usage=fmt_usage(total), sub=fmt_usage(sub))
+    else:
+        text = t("turn_tokens", usage=fmt_usage(total))
     return '<div class="msg-tokens">%s</div>' % esc(text)
 
 
 def render_page(builder, items):
     m = builder.meta
-    title = m["custom_title"] or m["title"] or "Claude Code セッション %s" % m["session_id"][:8]
+    title = m["custom_title"] or m["title"] or t("default_title", id=m["session_id"][:8])
     toc = []
     counts = {"user": 0, "assistant": 0}
     for idx, it in enumerate(items):
@@ -1007,41 +1325,50 @@ def render_page(builder, items):
                    '<span class="toc-time">%s</span></a></li>' % (
                        it["kind"], idx, "" if it["kind"] == "user" else "✳", esc(label), esc(fmt_ts(it["ts"]))))
     body = "\n".join(render_item(it, idx) for idx, it in enumerate(items))
+    period = t("period", start=fmt_ts(m["start"], True), end=fmt_ts(m["end"], True)) if m["start"] else ""
     facts = [
-        ("セッション ID", m["session_id"]),
-        ("作業ディレクトリ", m["cwd"] or ""),
-        ("ブランチ", m["branch"] or ""),
-        ("期間", "%s 〜 %s" % (fmt_ts(m["start"], True), fmt_ts(m["end"], True)) if m["start"] else ""),
-        ("モデル", ", ".join(m["models"])),
-        ("メッセージ数", "あなた %d 件 / Claude %d 件" % (counts["user"], counts["assistant"])),
+        (t("fact_session_id"), m["session_id"]),
+        (t("fact_cwd"), m["cwd"] or ""),
+        (t("fact_branch"), m["branch"] or ""),
+        (t("fact_period"), period),
+        (t("fact_models"), ", ".join(m["models"])),
+        (t("fact_messages"), t("messages_count", user=counts["user"], assistant=counts["assistant"])),
         ("Claude Code", m["version"] or ""),
     ]
     facts_html = "".join("<div><dt>%s</dt><dd>%s</dd></div>" % (esc(k), esc(v)) for k, v in facts if v)
-    # トークン数は文が長いので、横幅いっぱいの行で表示する
+    # Token rows are long, so they span the full width.
     total = builder.total_usage()
     if has_usage(total):
-        wide = [("トークン合計（サブエージェントを含む）", esc(fmt_usage(total, detail=True)))]
+        wide = [(t("fact_tokens_total"), esc(fmt_usage(total, detail=True)))]
         if has_usage(builder.sub_usage):
-            wide.append(("うちサブエージェント", esc(fmt_usage(builder.sub_usage, detail=True))))
+            wide.append((t("fact_tokens_subagents"), esc(fmt_usage(builder.sub_usage, detail=True))))
         if len(builder.usage_by_model) > 1:
-            wide.append(("モデル別", "<br>".join("%s: %s" % (esc(model), esc(fmt_usage(u)))
-                                                 for model, u in builder.usage_by_model.items())))
+            wide.append((t("fact_tokens_by_model"), "<br>".join("%s: %s" % (esc(model), esc(fmt_usage(u)))
+                                                                 for model, u in builder.usage_by_model.items())))
         facts_html += "".join('<div class="wide"><dt>%s</dt><dd>%s</dd></div>' % (esc(k), v) for k, v in wide)
     filename = re.sub(r"[\\/:*?\"<>|\s]+", "_", title).strip("_")[:60] + "_%s.html" % m["session_id"][:8]
     generated = dt.datetime.now().astimezone().strftime("%Y-%m-%d %H:%M")
+    js_messages = {k: t(k) for k in JS_MESSAGE_KEYS}
     values = {
+        "LANG": esc(get_lang()),
         "TITLE": esc(title),
         "FILENAME_JS": json.dumps(filename, ensure_ascii=False).replace("</", "<\\/"),
+        "MESSAGES_JS": json.dumps(js_messages, ensure_ascii=False).replace("</", "<\\/"),
         "FACTS": facts_html,
-        "FACTS_NOTE": ('<p class="facts-note">トークン数は履歴に記録された API 呼び出しの合計です。出力には思考を含みます。'
-                       'タイトルの自動生成や会話の圧縮など、Claude Code が内部で行う呼び出しは含みません。</p>'
-                       if has_usage(total) else ""),
+        "FACTS_NOTE": '<p class="facts-note">%s</p>' % esc(t("facts_note")) if has_usage(total) else "",
         "TOC": "".join(toc),
         "BODY": body,
-        "GENERATED": esc(generated),
+        "FOOTER": esc(t("footer", time=generated)),
     }
-    # 1 回の走査で置換する（本文に {{...}} が含まれていても二重に置換しない）
-    page = re.sub(r"\{\{([A-Z_]+)\}\}", lambda mo: values.get(mo.group(1), mo.group(0)), TEMPLATE)
+
+    def fill(mo):
+        key = mo.group(1)
+        if key.startswith("t:"):
+            return esc(t(key[2:]))  # {{t:key}} inserts a translated string
+        return values.get(key, mo.group(0))
+
+    # Replace everything in one pass, so "{{...}}" inside the transcript is never substituted.
+    page = re.sub(r"\{\{(t:[a-z_]+|[A-Z_]+)\}\}", fill, TEMPLATE)
     return page, filename
 
 
@@ -1056,13 +1383,13 @@ def cmd_render(args):
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(page, encoding="utf-8")
     n = sum(1 for it in items if it["kind"] in ("user", "assistant"))
-    print("出力しました: %s" % out)
-    print("元のセッション: %s" % path)
-    print("メッセージ %d 件 / %s KB" % (n, format(len(page.encode("utf-8")) // 1024, ",")))
+    print(t("rendered", path=out))
+    print(t("source", path=path))
+    print(t("stats", n=n, kb=fmt_num(len(page.encode("utf-8")) // 1024)))
 
 
 TEMPLATE = r"""<!DOCTYPE html>
-<html lang="ja">
+<html lang="{{LANG}}">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -1095,7 +1422,7 @@ body { margin: 0; background: var(--bg); color: var(--text);
 a { color: var(--user-bg); }
 code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12.5px; }
 
-/* ツールバー */
+/* Toolbar */
 .topbar { position: sticky; top: 0; z-index: 20; display: flex; align-items: center; gap: 8px;
   padding: 10px 16px; background: var(--panel); border-bottom: 1px solid var(--line); }
 .topbar h1 { font-size: 15px; margin: 0; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -1106,7 +1433,7 @@ code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospac
 .btn[aria-pressed="true"] { background: var(--chip-bg); }
 .btn-group { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; min-width: 0; }
 
-/* レイアウト */
+/* Layout */
 .layout { display: flex; align-items: flex-start; }
 .toc { position: sticky; top: 53px; width: 280px; flex: none; height: calc(100vh - 53px); overflow-y: auto;
   border-right: 1px solid var(--line); background: var(--panel); padding: 8px 0; }
@@ -1125,7 +1452,7 @@ main { flex: 1; min-width: 0; padding: 16px 16px 80px; }
 body { overflow-x: hidden; }
 .thread { max-width: 940px; margin: 0 auto; }
 
-/* セッション情報 */
+/* Session facts */
 .facts { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 12px 16px; margin-bottom: 20px; }
 .facts dl { margin: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 4px 20px; }
 .facts dt { color: var(--muted); font-size: 11.5px; }
@@ -1134,7 +1461,7 @@ body { overflow-x: hidden; }
 .facts-note { margin: 6px 0 0; font-size: 11.5px; color: var(--muted); }
 .msg-tokens { margin-top: 6px; padding-top: 4px; border-top: 1px dashed var(--line); font-size: 11.5px; color: var(--muted); }
 
-/* 吹き出し */
+/* Bubbles */
 .msg { display: flex; gap: 10px; margin: 14px 0; align-items: flex-start; }
 .msg > .avatar { width: 32px; height: 32px; border-radius: 50%; flex: none; display: grid; place-items: center;
   font-size: 16px; background: var(--chip-bg); }
@@ -1156,7 +1483,7 @@ body { overflow-x: hidden; }
 .chip { display: inline-block; font-size: 12px; padding: 2px 8px; margin: 4px 4px 0 0; border-radius: 6px; background: var(--chip-bg); color: var(--muted); word-break: break-all; }
 .msg.user .chip { background: rgba(255,255,255,.18); color: inherit; }
 
-/* 折り畳み */
+/* Collapsing */
 .msg-summary { display: none; font-size: 13px; cursor: pointer; }
 .msg-summary .sum-label { font-size: 10.5px; font-weight: 700; padding: 0 6px; margin-right: 6px; border-radius: 4px; background: var(--chip-bg); color: var(--muted); }
 .msg.user .msg-summary .sum-label { background: rgba(255,255,255,.22); color: inherit; }
@@ -1166,7 +1493,7 @@ body { overflow-x: hidden; }
 .fold-btn { margin-top: 6px; border: 0; background: none; color: inherit; opacity: .7; font-size: 12px; cursor: pointer; padding: 0; text-decoration: underline; }
 .fold-btn:hover { opacity: 1; }
 
-/* 本文 */
+/* Message body */
 .md > :first-child, .msg-body > p:first-child { margin-top: 0; }
 .md > :last-child { margin-bottom: 0; }
 .msg-body p { margin: .4em 0; overflow-wrap: anywhere; }
@@ -1195,7 +1522,7 @@ img.shot { max-width: 100%; max-height: 420px; border-radius: 8px; margin: 6px 0
 .todo-completed { color: var(--muted); text-decoration: line-through; }
 .todo-in_progress { font-weight: 600; }
 
-/* ツール・思考などの小ブロック */
+/* Small blocks: tools, thinking, ... */
 details > summary { cursor: pointer; list-style: none; }
 details > summary::-webkit-details-marker { display: none; }
 details > summary::before { content: "▸"; display: inline-block; width: 1em; color: var(--muted); transition: transform .15s; }
@@ -1217,7 +1544,7 @@ details[open] > summary::before { transform: rotate(90deg); }
 .msg.user .fold > summary { color: inherit; opacity: .85; }
 body.hide-tools .tool, body.hide-thinking .fold.thinking { display: none; }
 
-/* システム行 */
+/* System rows */
 .sys { display: flex; gap: 8px; justify-content: center; align-items: baseline; margin: 10px auto; max-width: 760px;
   font-size: 12px; color: var(--sys-text); text-align: center; }
 .sys-time { font-size: 11px; opacity: .7; flex: none; }
@@ -1257,37 +1584,38 @@ body.hide-system .sys { display: none; }
 </head>
 <body>
 <div class="topbar">
-  <button class="btn" id="btn-toc" type="button" aria-pressed="true" title="目次の表示を切り替え">☰<span class="lbl"> 目次</span></button>
+  <button class="btn" id="btn-toc" type="button" aria-pressed="true" title="{{t:btn_toc_title}}">☰<span class="lbl"> {{t:btn_toc}}</span></button>
   <h1>{{TITLE}}</h1>
   <div class="btn-group">
-    <button class="btn" id="btn-expand" type="button">すべて展開</button>
-    <button class="btn" id="btn-collapse" type="button">長文を折り畳む</button>
-    <button class="btn" id="btn-tools" type="button" aria-pressed="true">ツール</button>
-    <button class="btn" id="btn-thinking" type="button" aria-pressed="true">思考</button>
-    <button class="btn" id="btn-system" type="button" aria-pressed="true">システム</button>
-    <button class="btn" id="btn-copy" type="button" title="この HTML をクリップボードにコピー">📋<span class="lbl"> コピー</span></button>
-    <button class="btn primary" id="btn-download" type="button" title="この HTML をダウンロード">⬇<span class="lbl"> ダウンロード</span></button>
+    <button class="btn" id="btn-expand" type="button">{{t:btn_expand}}</button>
+    <button class="btn" id="btn-collapse" type="button">{{t:btn_collapse}}</button>
+    <button class="btn" id="btn-tools" type="button" aria-pressed="true">{{t:btn_tools}}</button>
+    <button class="btn" id="btn-thinking" type="button" aria-pressed="true">{{t:btn_thinking}}</button>
+    <button class="btn" id="btn-system" type="button" aria-pressed="true">{{t:btn_system}}</button>
+    <button class="btn" id="btn-copy" type="button" title="{{t:btn_copy_title}}">📋<span class="lbl"> {{t:btn_copy}}</span></button>
+    <button class="btn primary" id="btn-download" type="button" title="{{t:btn_download_title}}">⬇<span class="lbl"> {{t:btn_download}}</span></button>
   </div>
 </div>
 <div class="layout">
-  <nav class="toc" aria-label="目次">
-    <h2>目次</h2>
+  <nav class="toc" aria-label="{{t:toc}}">
+    <h2>{{t:toc}}</h2>
     <ol>{{TOC}}</ol>
   </nav>
   <main>
     <div class="thread">
       <section class="facts"><dl>{{FACTS}}</dl>{{FACTS_NOTE}}</section>
       {{BODY}}
-      <div class="footer">claude-code-session-viewer で {{GENERATED}} に生成</div>
+      <div class="footer">{{FOOTER}}</div>
     </div>
   </main>
 </div>
 <div class="toast" id="toast" role="status"></div>
 <script>
 (function () {
-  // 状態を変える前の HTML を保存しておき、コピー・ダウンロードではこれを使う
+  // Keep the HTML as it was before any UI state changed; copy and download use this snapshot.
   var SNAPSHOT = "<!DOCTYPE html>\n" + document.documentElement.outerHTML;
   var FILENAME = {{FILENAME_JS}};
+  var MSG = {{MESSAGES_JS}};
   var body = document.body;
 
   function store(key, val) { try { localStorage.setItem("ccsv:" + key, val); } catch (e) {} }
@@ -1298,7 +1626,7 @@ body.hide-system .sys { display: none; }
     clearTimeout(toast._t); toast._t = setTimeout(function () { t.classList.remove("show"); }, 1800);
   }
 
-  // 目次の ON/OFF（広い画面はサイドバー、狭い画面は重ねて表示）
+  // Table of contents on/off (a sidebar on wide screens, an overlay on narrow ones)
   var narrow = window.matchMedia("(max-width: 860px)");
   var btnToc = document.getElementById("btn-toc");
   function tocVisible() {
@@ -1318,7 +1646,7 @@ body.hide-system .sys { display: none; }
   });
   if (narrow.addEventListener) narrow.addEventListener("change", syncTocButton);
 
-  // ツール・思考・システム行の表示切り替え
+  // Show or hide tools, thinking and system rows
   [["btn-tools", "hide-tools"], ["btn-thinking", "hide-thinking"], ["btn-system", "hide-system"]].forEach(function (pair) {
     var b = document.getElementById(pair[0]);
     b.addEventListener("click", function () {
@@ -1327,11 +1655,11 @@ body.hide-system .sys { display: none; }
     });
   });
 
-  // メッセージの折り畳み
+  // Collapsing messages
   function setCollapsed(msg, collapsed) {
     msg.classList.toggle("collapsed", collapsed);
     var b = msg.querySelector(":scope > .bubble > .fold-btn");
-    if (b) { b.textContent = collapsed ? "全文を表示" : "折り畳む"; b.setAttribute("aria-expanded", collapsed ? "false" : "true"); }
+    if (b) { b.textContent = collapsed ? MSG.show_full : MSG.collapse; b.setAttribute("aria-expanded", collapsed ? "false" : "true"); }
   }
   document.addEventListener("click", function (ev) {
     var b = ev.target.closest(".fold-btn");
@@ -1352,14 +1680,14 @@ body.hide-system .sys { display: none; }
     document.querySelectorAll(".msg.long").forEach(function (m) { setCollapsed(m, true); });
   });
 
-  // 狭い画面では、目次を選んだら閉じる
+  // On narrow screens, close the table of contents after picking an entry
   document.querySelectorAll(".toc a").forEach(function (a) {
     a.addEventListener("click", function () {
       if (narrow.matches) { body.classList.remove("toc-open"); syncTocButton(); }
     });
   });
 
-  // 表示中のメッセージを目次で強調
+  // Highlight the message currently in view in the table of contents
   var links = {};
   document.querySelectorAll(".toc a").forEach(function (a) { links[a.getAttribute("href").slice(1)] = a; });
   var current = null;
@@ -1379,7 +1707,7 @@ body.hide-system .sys { display: none; }
     document.querySelectorAll(".thread > .msg[id]").forEach(function (m) { io.observe(m); });
   }
 
-  // ダウンロード
+  // Download
   document.getElementById("btn-download").addEventListener("click", function () {
     var blob = new Blob([SNAPSHOT], { type: "text/html;charset=utf-8" });
     var url = URL.createObjectURL(blob);
@@ -1387,10 +1715,10 @@ body.hide-system .sys { display: none; }
     a.href = url; a.download = FILENAME;
     document.body.appendChild(a); a.click(); a.remove();
     setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
-    toast("ダウンロードしました");
+    toast(MSG.toast_downloaded);
   });
 
-  // クリップボードにコピー（file:// などで Clipboard API が使えない場合は execCommand で代替）
+  // Copy to the clipboard (fall back to execCommand where the Clipboard API is unavailable, e.g. file://)
   function legacyCopy(text) {
     var ta = document.createElement("textarea");
     ta.value = text; ta.setAttribute("readonly", "");
@@ -1402,8 +1730,8 @@ body.hide-system .sys { display: none; }
     return ok;
   }
   document.getElementById("btn-copy").addEventListener("click", function () {
-    var done = function () { toast("HTML をクリップボードにコピーしました"); };
-    var fail = function () { toast(legacyCopy(SNAPSHOT) ? "HTML をクリップボードにコピーしました" : "コピーできませんでした"); };
+    var done = function () { toast(MSG.toast_copied); };
+    var fail = function () { toast(legacyCopy(SNAPSHOT) ? MSG.toast_copied : MSG.toast_copy_failed); };
     if (navigator.clipboard && window.isSecureContext) {
       navigator.clipboard.writeText(SNAPSHOT).then(done, fail);
     } else {
@@ -1417,18 +1745,34 @@ body.hide-system .sys { display: none; }
 """
 
 
-def main():
-    ap = argparse.ArgumentParser(description="Claude Code のセッション履歴を HTML に変換する")
+def build_parser():
+    ap = argparse.ArgumentParser(description=t("cli_description"))
+    lang_help = t("cli_lang")
+    # --lang is accepted both before and after the subcommand. main() reads it with a pre-parser,
+    # so the value argparse stores here is not used.
+    ap.add_argument("--lang", choices=SUPPORTED_LANGS, help=lang_help)
     sub = ap.add_subparsers(dest="cmd", required=True)
-    lp = sub.add_parser("list", help="セッションの一覧を表示する")
-    lp.add_argument("--all", action="store_true", help="全プロジェクトのセッションを表示する")
-    lp.add_argument("--project", help="このディレクトリのセッションを表示する（既定: カレントディレクトリ）")
-    lp.add_argument("--limit", type=int, default=15)
-    rp = sub.add_parser("render", help="セッションを HTML に変換する")
-    rp.add_argument("session", help="セッション ID（先頭一致可）または JSONL ファイルのパス")
-    rp.add_argument("--out", help="出力先のファイルまたはディレクトリ（既定: %s）" % DEFAULT_OUT_DIR)
-    rp.add_argument("--no-subagents", action="store_true", help="サブエージェントのやり取りを含めない")
-    args = ap.parse_args()
+    lp = sub.add_parser("list", help=t("cli_list"))
+    lp.add_argument("--all", action="store_true", help=t("cli_all"))
+    lp.add_argument("--project", help=t("cli_project"))
+    lp.add_argument("--limit", type=int, default=15, help=t("cli_limit"))
+    lp.add_argument("--lang", choices=SUPPORTED_LANGS, help=lang_help)
+    rp = sub.add_parser("render", help=t("cli_render"))
+    rp.add_argument("session", help=t("cli_session"))
+    rp.add_argument("--out", help=t("cli_out", path=DEFAULT_OUT_DIR))
+    rp.add_argument("--no-subagents", action="store_true", help=t("cli_no_subagents"))
+    rp.add_argument("--lang", choices=SUPPORTED_LANGS, help=lang_help)
+    return ap
+
+
+def main(argv=None):
+    argv = sys.argv[1:] if argv is None else argv
+    # Pick the language before building the parser, so that --help is localized as well.
+    pre_parser = argparse.ArgumentParser(add_help=False)
+    pre_parser.add_argument("--lang", choices=SUPPORTED_LANGS)
+    known, _ = pre_parser.parse_known_args(argv)
+    set_lang(known.lang or detect_lang())
+    args = build_parser().parse_args(argv)
     if args.cmd == "list":
         cmd_list(args)
     else:

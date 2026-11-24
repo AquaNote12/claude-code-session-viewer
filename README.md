@@ -1,139 +1,165 @@
 # claude-code-session-viewer
 
-Claude Code のセッション履歴を、メッセージアプリ風の吹き出し表示で 1 ファイルの HTML に書き出す Claude Code 用 skill。
+English | [日本語](README.ja.md)
 
-## できること
+A Claude Code skill that exports a session transcript to a single standalone HTML page that looks like a chat app.
 
-- 指定したセッションのやり取りを、時系列順に上から吹き出しで表示する
-- Claude の吹き出しには、モデル（例: `claude-opus-5-5`）と effort（例: `high`）を表示する
-- トークン数を、Claude の吹き出しごとと、セッション全体の合計（モデル別の内訳つき）で表示する。出力と入力を分け、入力のうちキャッシュ読み込みの分も示す。サブエージェントの分は合計に含め、内訳を別に示す。料金は表示しない
-- 長いメッセージは折り畳む。折り畳んでいるときは概要（Claude は最後のテキストの冒頭と、使ったツールの集計）を表示する
-- メッセージ単位の目次をサイドバーに表示する。目次の ON/OFF を切り替えられる
-- ワンクリックで HTML をダウンロード、またはクリップボードにコピーできる
-- ツール呼び出し、思考、システム行（コマンド実行・圧縮・モード切り替えなど）の表示を切り替えられる
-- サブエージェントのやり取りを、呼び出した Agent ツールの中に入れ子で表示する
-- ダークモードとスマホ幅に対応している
+## Features
 
-外部ライブラリや CDN は使っていない。生成した HTML はオフラインでも開ける。
+- Shows the conversation of a session in chronological order, as chat bubbles.
+- Claude's bubbles show the model (e.g. `claude-opus-5-5`) and the effort (e.g. `high`).
+- Shows token usage for each Claude bubble and for the whole session (with a per-model breakdown). Output and input are shown separately, and the cache-read part of the input is shown as well. Subagent usage is included in the totals and also shown on its own. Costs are not shown.
+- Long messages are collapsed. A collapsed message shows a summary (for Claude: the beginning of its last text and the tools it used).
+- A table of contents with one entry per message is shown in a sidebar, and can be turned on and off.
+- One click downloads the HTML or copies it to the clipboard.
+- Tool calls, thinking and system rows (commands, compaction, mode changes, ...) can be shown or hidden.
+- Subagent conversations are shown nested inside the Agent tool call that started them.
+- The page can be generated in English or Japanese (see [Language](#language)).
+- Supports dark mode and phone-sized screens.
 
-## 必要なもの
+No external libraries or CDNs are used, so the generated HTML also works offline.
 
-- Claude Code（CLI・VS Code 拡張機能のどちらでも使える）
-- Python 3.9 以上（macOS 標準の `python3` で動く。追加のパッケージは不要）
+## Requirements
 
-この skill は Claude Code 専用。Claude Code が保存するセッション履歴（`~/.claude/projects/`）を読み、Claude Code 独自の置換（`${CLAUDE_SKILL_DIR}` など）も使うため、Cursor や Codex など他のエージェントに入れても動かない。
+- Claude Code (works in both the CLI and the VS Code extension)
+- Python 3.9 or later (the `python3` that ships with macOS is fine; no extra packages)
 
-## インストール
+This skill only works with Claude Code. It reads the session transcripts that Claude Code stores (`~/.claude/projects/`) and relies on Claude Code's own substitutions such as `${CLAUDE_SKILL_DIR}`, so it does not work when installed for other agents such as Cursor or Codex.
 
-次のどちらかの方法で、**ユーザー単位**（`~/.claude/skills/`）に入れる。ユーザー単位で入れれば、どのプロジェクトでも、CLI と VS Code 拡張機能の両方で使える。
+## Installation
 
-### 方法 1: GitHub CLI（推奨）
+Install it **for your user** (`~/.claude/skills/`) with one of the methods below. A user-level install works in every project, in both the CLI and the VS Code extension.
 
-GitHub CLI v2.90.0 以上が必要（`gh skill` は 2026 年 4 月に追加されたプレビュー機能）。古い場合は先に gh を更新する。
+### Option 1: GitHub CLI (recommended)
+
+Requires GitHub CLI v2.90.0 or later (`gh skill` is a preview feature added in April 2026). Update gh first if it is older.
 
 ```bash
 gh skill install AquaNote12/claude-code-session-viewer claude-code-session-viewer --agent claude-code --scope user
 ```
 
-`--agent claude-code --scope user` は省略しないこと。省略すると、GitHub Copilot 向けに、今いる git リポジトリの中へ入ってしまう。
+Do not leave out `--agent claude-code --scope user`. Without them, the skill is installed for GitHub Copilot, inside the git repository you are in.
 
-特定のバージョンに固定する場合は、skill 名の後ろに `@<タグ>` を付ける（例: `claude-code-session-viewer@v0.1.0`）。
+To pin a version, append `@<tag>` to the skill name (e.g. `claude-code-session-viewer@v0.1.0`).
 
-更新:
+Update:
 
 ```bash
 gh skill update
 ```
 
-### 方法 2: skills CLI（Node.js が必要）
+### Option 2: skills CLI (requires Node.js)
 
 ```bash
 npx skills add AquaNote12/claude-code-session-viewer --skill claude-code-session-viewer -a claude-code -g
 ```
 
-`-g` を付けないと、今いるプロジェクトの中にだけ入る。
+Without `-g`, the skill is installed only in the current project.
 
-更新・削除:
+Update and remove:
 
 ```bash
 npx skills update claude-code-session-viewer
 npx skills remove claude-code-session-viewer
 ```
 
-### 方法 3: 手動で配置
+### Option 3: Manual
 
-上の 2 つが使えない環境向け。リポジトリを clone し、skill のディレクトリを `~/.claude/skills/` にシンボリックリンクする。
+For environments where neither of the above is available. Clone the repository and symlink the skill directory into `~/.claude/skills/`.
 
 ```bash
 git clone https://github.com/AquaNote12/claude-code-session-viewer.git
 ln -s "$(pwd)/claude-code-session-viewer/skills/claude-code-session-viewer" ~/.claude/skills/claude-code-session-viewer
 ```
 
-更新は clone したディレクトリで `git pull` する。
+To update, run `git pull` in the cloned directory.
 
-### インストール後
+### After installing
 
-すでに開いている Claude Code のセッションに skill が出てこない場合は、新しいセッションを開く。
+If the skill does not show up in a Claude Code session that was already open, start a new session.
 
-## 使い方
+## Usage
 
-Claude Code の中で次のように呼び出す。
+Run it inside Claude Code:
 
 ```
-/claude-code-session-viewer              # 現在のセッションを書き出す
-/claude-code-session-viewer list         # セッション一覧から選ぶ
-/claude-code-session-viewer 1a2b3c4d     # ID（先頭一致）で指定する
+/claude-code-session-viewer                # export the current session
+/claude-code-session-viewer list           # pick from a list of sessions
+/claude-code-session-viewer 1a2b3c4d       # by session ID (a unique prefix is enough)
+/claude-code-session-viewer --lang en      # choose the language of the page
 ```
 
-「このセッションを HTML にして」のように頼んでも起動する。
+Asking in plain words, such as "export this session as HTML", also works.
 
-スクリプトを直接実行することもできる（パスはリポジトリのルートから）。
+You can also run the script directly (paths are relative to the repository root):
 
 ```bash
-python3 skills/claude-code-session-viewer/scripts/render_session.py list [--all] [--limit N] [--project DIR]
-python3 skills/claude-code-session-viewer/scripts/render_session.py render <セッションID | JSONLのパス> [--out PATH] [--no-subagents]
+python3 skills/claude-code-session-viewer/scripts/render_session.py list [--all] [--limit N] [--project DIR] [--lang en|ja]
+python3 skills/claude-code-session-viewer/scripts/render_session.py render <session ID | path to JSONL> [--out PATH] [--no-subagents] [--lang en|ja]
 ```
 
-## リポジトリの構成
+The default output directory is `~/Downloads/claude-code-sessions/`.
+
+## Language
+
+The page (labels, buttons, system rows) and the script's messages are available in English and Japanese. The conversation itself is shown in whatever language it was written in.
+
+The language is chosen in this order:
+
+1. The language the user asked for explicitly (`--lang en`, "in English", 「日本語で」, ...).
+2. The language the user is writing in, judged by Claude (from the conversation, or the response language configured in Claude Code). Japanese gives `ja`; any other language gives `en`.
+3. When neither is available, the script uses the OS language (`LC_ALL` / `LC_MESSAGES` / `LANG`, or the system language on macOS), and English if that is unknown.
+
+## What is shown
+
+Everything that means something to a human reader is shown; internal bookkeeping is not.
+
+| Shown | Not shown |
+|---|---|
+| User messages (including messages sent while Claude was working) and attached images | API request records, remaining-token notes |
+| Claude's text, and thinking (only when its content was recorded) | Notifications about changes to the tool or skill lists |
+| Tool calls and results (Bash commands, Edit diffs, to-do lists, ...) | Automatically added context such as environment info, date and language settings |
+| Subagent conversations | File history snapshots |
+| Skills being loaded, hook errors | Caveats about local commands, image path notes |
+| Slash commands and their output, background task notifications | Empty (encrypted) thinking blocks |
+| Compaction and its summary, plan mode and auto mode changes, linked pull requests | |
+| Files open and lines selected in the IDE | |
+
+## Caveats
+
+- The JSONL transcript format is internal to Claude Code and not officially documented. A Claude Code update that changes the format may break the page. Unknown record types are skipped.
+- By default, Claude Code deletes old session files after a while (`cleanupPeriodDays`).
+- Each tool result is truncated to 30,000 characters. Images are embedded in the HTML, so sessions with many images produce large files.
+- The HTML contains tool results and file contents as they are. Check for sensitive information before sharing it.
+- On pages opened via `file://`, some browsers do not allow the Clipboard API. The copy button then falls back to `document.execCommand("copy")`.
+
+## Development
 
 ```
 claude-code-session-viewer/
 ├── skills/
-│   └── claude-code-session-viewer/      # skill 本体（この単位でインストールされる）
+│   └── claude-code-session-viewer/      # the skill itself (this directory is what gets installed)
 │       ├── SKILL.md
 │       └── scripts/render_session.py
+├── tests/
+│   ├── test_render_session.py
+│   └── fixtures/                        # a made-up session used by the tests
 ├── LICENSE
 ├── README.md
+├── README.ja.md
 └── .gitignore
 ```
 
-`skills/<skill名>/SKILL.md` の配置は Agent Skills 仕様の規約に合わせている。`gh skill install` と `npx skills add` はこの配置から skill を見つける。
+The `skills/<skill name>/SKILL.md` layout follows the Agent Skills specification. `gh skill install` and `npx skills add` find the skill there.
 
-出力先の既定は `~/Downloads/claude-code-sessions/` 。
+Run the tests from the repository root:
 
-## 表示するもの・しないもの
+```bash
+python3 -m unittest discover -s tests
+```
 
-人が読んで意味のあるものはなるべく表示し、内部向けの記録は表示しない。
+All user-visible strings live in `MESSAGES` in `render_session.py`. When you add or change one, update both `en` and `ja`; the tests check that both languages have the same keys and placeholders, and that the English page contains no Japanese.
 
-| 表示する | 表示しない |
-|---|---|
-| ユーザーの発言（Claude の作業中に送った発言も含む）、添付画像 | API リクエストの記録、トークン残量の注記 |
-| Claude のテキスト、思考（中身が記録されている場合のみ） | ツール一覧・Skill 一覧などの差分通知 |
-| ツール呼び出しと結果（Bash のコマンド、Edit の差分、ToDo など） | 環境情報・日付・言語設定などの自動付与情報 |
-| サブエージェントのやり取り | ファイル履歴のスナップショット |
-| Skill の読み込み、フックのエラー | ローカルコマンドの注意書き、画像パスの注記 |
-| スラッシュコマンドとその出力、バックグラウンドタスクの通知 | 中身が空の思考ブロック（暗号化された思考） |
-| 会話の圧縮と要約、プランモード・オートモードの切り替え、PR との紐付け | |
-| IDE で開いていたファイル・選択範囲 | |
-
-## 注意点
-
-- セッション履歴の JSONL は Claude Code の内部形式で、公式には文書化されていない。Claude Code のバージョンアップで形式が変わると、表示が崩れる可能性がある。知らない種類のレコードは読み飛ばすようにしてある。
-- 既定では古いセッションファイルは一定期間（`cleanupPeriodDays`）で自動削除される。
-- ツール結果は 1 件あたり 30,000 文字で切り詰める。画像は HTML に埋め込むので、画像の多いセッションはファイルが大きくなる。
-- HTML にはツールの実行結果やファイルの中身もそのまま入る。共有する前に機密情報が含まれていないか確認すること。
-- `file://` で開いたページではブラウザによってクリップボード API が使えない。その場合は `document.execCommand("copy")` で代わりにコピーする。
-
-## ライセンス
+## License
 
 [MIT License](LICENSE)
