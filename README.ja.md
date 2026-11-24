@@ -142,7 +142,16 @@ claude-code-session-viewer/
 ├── skills/
 │   └── claude-code-session-viewer/      # skill 本体（この単位でインストールされる）
 │       ├── SKILL.md
-│       └── scripts/render_session.py
+│       └── scripts/
+│           ├── render_session.py        # 入口。CLI と言語の決定
+│           └── ccsv/
+│               ├── i18n.py              # 現在の言語、文言の取得、OS の言語の判定
+│               ├── messages/            # 画面に出る文言。言語ごとに 1 ファイル（en.py が正本）
+│               ├── util.py              # 共通の小さな関数
+│               ├── markdown.py          # 最小限の Markdown → HTML 変換
+│               ├── transcript.py        # セッションの探索と履歴の解析（Claude Code の JSONL 形式）
+│               ├── render.py            # HTML ページの組み立て
+│               └── assets/              # page.html・style.css・app.js（生成する HTML に埋め込む）
 ├── tests/
 │   ├── test_render_session.py
 │   └── fixtures/                        # テスト用の架空のセッション
@@ -160,7 +169,11 @@ claude-code-session-viewer/
 python3 -m unittest discover -s tests
 ```
 
-画面に出る文言は、すべて `render_session.py` の `MESSAGES` にまとめてある。追加・変更するときは `en` と `ja` の両方を更新すること。2 言語でキーとプレースホルダが一致しているか、英語のページに日本語が残っていないかをテストで確認している。
+変更する場所:
+
+- **文言**: `ccsv/messages/en.py`（正本。キーごとに用途をコメントで書いてある）と、`ccsv/messages/ja.py` の同じキー。全言語でキーとプレースホルダが一致しているか、英語のページに日本語が残っていないかをテストで確認している。言語を追加するときは、同じ場所にファイルを足し、`ccsv/messages/__init__.py` に登録する。
+- **Claude Code の更新で履歴の形式が変わった**: `ccsv/transcript.py`。JSONL の形式を読むのはこのモジュールだけ。
+- **ページの見た目と動き**: `ccsv/assets/`（`page.html`・`style.css`・`app.js`）。普通の HTML・CSS・JavaScript として編集できる。`app.js` は必要な値をページ内の JSON から読む。置換用の書式（`{{...}}`）は `page.html` の中でだけ使える。
 
 ## ライセンス
 

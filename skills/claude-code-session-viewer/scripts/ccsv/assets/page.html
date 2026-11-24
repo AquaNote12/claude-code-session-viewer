@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="{{LANG}}">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{TITLE}}</title>
+<style>
+/*{{STYLE}}*/
+</style>
+</head>
+<body>
+<div class="topbar">
+  <button class="btn" id="btn-toc" type="button" aria-pressed="true" title="{{t:btn_toc_title}}">☰<span class="lbl"> {{t:btn_toc}}</span></button>
+  <h1>{{TITLE}}</h1>
+  <div class="btn-group">
+    <button class="btn" id="btn-expand" type="button">{{t:btn_expand}}</button>
+    <button class="btn" id="btn-collapse" type="button">{{t:btn_collapse}}</button>
+    <button class="btn" id="btn-tools" type="button" aria-pressed="true">{{t:btn_tools}}</button>
+    <button class="btn" id="btn-thinking" type="button" aria-pressed="true">{{t:btn_thinking}}</button>
+    <button class="btn" id="btn-system" type="button" aria-pressed="true">{{t:btn_system}}</button>
+    <button class="btn" id="btn-copy" type="button" title="{{t:btn_copy_title}}">📋<span class="lbl"> {{t:btn_copy}}</span></button>
+    <button class="btn primary" id="btn-download" type="button" title="{{t:btn_download_title}}">⬇<span class="lbl"> {{t:btn_download}}</span></button>
+  </div>
+</div>
+<div class="layout">
+  <nav class="toc" aria-label="{{t:toc}}">
+    <h2>{{t:toc}}</h2>
+    <ol>{{TOC}}</ol>
+  </nav>
+  <main>
+    <div class="thread">
+      <section class="facts"><dl>{{FACTS}}</dl>{{FACTS_NOTE}}</section>
+      {{BODY}}
+      <div class="footer">{{FOOTER}}</div>
+    </div>
+  </main>
+</div>
+<div class="toast" id="toast" role="status"></div>
+<script id="ccsv-data" type="application/json">{{DATA_JSON}}</script>
+<script>
+/*{{SCRIPT}}*/
+</script>
+</body>
+</html>

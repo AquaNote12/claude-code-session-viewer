@@ -2,3 +2,5 @@ __pycache__/
 *.pyc
 .DS_Store
 *.html
+# The page template is part of the skill and must be committed
+!skills/claude-code-session-viewer/scripts/ccsv/assets/*.html

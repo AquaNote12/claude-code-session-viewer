@@ -140,7 +140,16 @@ claude-code-session-viewer/
 ├── skills/
 │   └── claude-code-session-viewer/      # the skill itself (this directory is what gets installed)
 │       ├── SKILL.md
-│       └── scripts/render_session.py
+│       └── scripts/
+│           ├── render_session.py        # entry point: command line and language choice
+│           └── ccsv/
+│               ├── i18n.py              # current language, message lookup, OS language detection
+│               ├── messages/            # user-visible strings, one file per language (en.py is the source)
+│               ├── util.py              # small shared helpers
+│               ├── markdown.py          # minimal Markdown-to-HTML converter
+│               ├── transcript.py        # finding sessions and parsing transcripts (Claude Code's JSONL format)
+│               ├── render.py            # building the HTML page
+│               └── assets/              # page.html, style.css, app.js (inlined into every page)
 ├── tests/
 │   ├── test_render_session.py
 │   └── fixtures/                        # a made-up session used by the tests
@@ -158,7 +167,11 @@ Run the tests from the repository root:
 python3 -m unittest discover -s tests
 ```
 
-All user-visible strings live in `MESSAGES` in `render_session.py`. When you add or change one, update both `en` and `ja`; the tests check that both languages have the same keys and placeholders, and that the English page contains no Japanese.
+Where to make a change:
+
+- **Wording**: `ccsv/messages/en.py` (the source, with a comment on what each key is for) and the same key in `ccsv/messages/ja.py`. The tests check that every language has the same keys and placeholders, and that the English page contains no Japanese. To add a language, add a file next to them and register it in `ccsv/messages/__init__.py`.
+- **A Claude Code update changed the transcript format**: `ccsv/transcript.py`. It is the only module that reads the JSONL format.
+- **Look and behaviour of the page**: `ccsv/assets/` (`page.html`, `style.css`, `app.js`). They are plain HTML, CSS and JavaScript; `app.js` reads the values it needs from the JSON block in the page. Placeholders (`{{...}}`) are only allowed in `page.html`.
 
 ## License
 
