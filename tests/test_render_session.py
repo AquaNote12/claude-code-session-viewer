@@ -333,6 +333,20 @@ class SecurityTest(ResetLangMixin, unittest.TestCase):
         self.assertIn("script-src 'sha256-%s'" % digest, csp)
         self.assertIn('<meta name="referrer" content="no-referrer">', page)
 
+    def test_saved_copies_and_windows_line_endings_are_recognised(self):
+        _, page = render_fixture("en")
+        downloaded = page.replace('<html lang="en">\n<head>', '<html lang="en"><head>', 1)  # what Download saves
+        self.assertNotEqual(downloaded, page)
+        for name, variant in (("downloaded copy", downloaded), ("CRLF", page.replace("\n", "\r\n"))):
+            with self.subTest(name):
+                self.assertTrue(render.is_generated_page(variant))
+
+    def test_page_check_runs_in_linear_time(self):
+        _, page = render_fixture("en")
+        start = time.time()
+        self.assertFalse(render.is_generated_page(page + "<script " * 200000))
+        self.assertLess(time.time() - start, 2)
+
     def test_generated_pages_are_recognised_in_every_language(self):
         for lang in MESSAGES:
             with self.subTest(lang=lang):
@@ -493,6 +507,13 @@ class OutputFileTest(ResetLangMixin, unittest.TestCase):
                 "extra upper-case script": genuine.replace("</body>", "<SCRIPT SRC=x.js></SCRIPT></body>"),
                 "changed CSP": re.sub(r"sha256-[A-Za-z0-9+/=]+", "sha256-AAAA", genuine, count=1),
                 "script before the head": "<script>alert(1)</script>" + genuine,
+                "meta refresh in the body": genuine.replace(
+                    "</body>", '<meta http-equiv="refresh" content="0;url=https://attacker.example/">\n</body>'),
+                "meta refresh in the head": genuine.replace(
+                    "<title>", '<meta http-equiv="refresh" content="0;url=file:///tmp/evil.html"><title>', 1),
+                "upper-case META": genuine.replace("</body>", "<META HTTP-EQUIV=refresh CONTENT=0;url=x></body>"),
+                "link": genuine.replace("</body>", '<link rel="dns-prefetch" href="//leak.attacker.example"></body>'),
+                "base": genuine.replace("<title>", '<base href="https://attacker.example/"><title>', 1),
             }
             with mock.patch.object(render_session.webbrowser, "open") as opened:
                 for name, html_text in forged.items():
