@@ -79,20 +79,34 @@
   // Highlight the message currently in view in the table of contents
   var links = {};
   document.querySelectorAll(".toc a").forEach(function (a) { links[a.getAttribute("href").slice(1)] = a; });
+  var toc = document.querySelector(".toc");
   var current = null;
+  function setActive(a) {
+    if (a === current) return;
+    if (current) current.classList.remove("active");
+    current = a;
+    if (a) {
+      a.classList.add("active");
+      if (tocVisible()) revealInToc(a);
+    }
+  }
+  function revealInToc(a) {
+    // Scroll only the TOC box. Do not use scrollIntoView() here: it also acts on the page itself and
+    // interrupts the user's own (momentum) scrolling, which made scrolling up from the bottom stutter.
+    var r = a.getBoundingClientRect(), tr = toc.getBoundingClientRect();
+    if (r.top < tr.top) toc.scrollTop -= tr.top - r.top;
+    else if (r.bottom > tr.bottom) toc.scrollTop += r.bottom - tr.bottom;
+  }
   if ("IntersectionObserver" in window) {
+    var facts = document.querySelector(".facts");
     var io = new IntersectionObserver(function (entries) {
       entries.forEach(function (e) {
         if (!e.isIntersecting) return;
-        var a = links[e.target.id];
-        if (!a || a === current) return;
-        if (current) current.classList.remove("active");
-        current = a; a.classList.add("active");
-        var toc = document.querySelector(".toc");
-        var r = a.getBoundingClientRect(), tr = toc.getBoundingClientRect();
-        if (r.top < tr.top || r.bottom > tr.bottom) a.scrollIntoView({ block: "nearest" });
+        // Back at the session facts above the first message: nothing is highlighted.
+        setActive(e.target === facts ? null : (links[e.target.id] || current));
       });
     }, { rootMargin: "-60px 0px -70% 0px" });
+    if (facts) io.observe(facts);
     document.querySelectorAll(".thread > .msg[id]").forEach(function (m) { io.observe(m); });
   }
 

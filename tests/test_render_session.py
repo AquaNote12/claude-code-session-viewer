@@ -99,6 +99,14 @@ class AssetsTest(unittest.TestCase):
         self.assertTrue(used)
         self.assertEqual(used - set(render.JS_MESSAGE_KEYS), set())
 
+    def test_toc_sync_does_not_scroll_the_page(self):
+        # scrollIntoView() in the TOC highlight code interrupted the user's scrolling (scrolling up from the
+        # bottom stuttered). The highlight code must scroll only the TOC box.
+        app = (ASSETS / "app.js").read_text(encoding="utf-8")
+        start = app.index("// Highlight the message currently in view")
+        end = app.index("// Download", start)
+        self.assertNotIn(".scrollIntoView(", app[start:end])
+
     def test_style_and_script_have_no_placeholders(self):
         # Placeholders are only allowed in page.html; anywhere else they would be substituted by mistake.
         for name in ("style.css", "app.js"):
