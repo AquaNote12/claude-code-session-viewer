@@ -56,10 +56,10 @@ def load_template():
     return page, "sha256-" + digest
 
 
-# Elements that could run code or leave the page by themselves (<meta http-equiv="refresh"> navigates
-# without any script, and the CSP does not restrict navigation). Matched by position only (linear time).
-# Elements that can load, navigate or embed something without a click. Frames are included because
-# an iframe srcdoc carries a whole document whose tags are entity-encoded, so they would not be found here.
+# Elements that can run code, load, navigate or embed something without a click. <meta http-equiv="refresh">
+# navigates without any script, and the CSP does not restrict navigation. Frames are included because an
+# iframe srcdoc carries a whole document whose tags are entity-encoded, so they would not be found here.
+# Matched by position only (linear time).
 ACTIVE_TAG_RE = re.compile(r"<(script|meta|link|base|i?frame|frameset|object|embed)\b", re.I)
 EXPECTED_ACTIVE_TAGS = ['<script id="ccsv-data" type="application/json">', "<script>"]
 
@@ -73,8 +73,8 @@ def is_generated_page(text):
       (Windows line endings, and the copy the page itself saves, which drops the newline before <head>,
       are accepted.)
     - After that, the only <script>, <meta>, <link>, <base>, frame, <object> or <embed> elements are the data
-      block and the inline app.js. The CSP allows only the hash of this version's app.js, so on such a page nothing else can run,
-      and no meta refresh can send the browser elsewhere.
+      block and the inline app.js. The CSP allows only the hash of this version's app.js, so on such a page
+      nothing else can run, and no meta refresh can send the browser elsewhere.
     It does not prove that the page is unchanged: added text or plain links are not detected.
     Pages from other versions (with a different app.js) do not pass; open them in the browser yourself.
     """

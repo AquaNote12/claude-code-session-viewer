@@ -518,6 +518,8 @@ class OutputFileTest(ResetLangMixin, unittest.TestCase):
                     "</body>", '<iframe srcdoc="&lt;link rel=dns-prefetch href=//leak.attacker.example&gt;"></iframe></body>'),
                 "object": genuine.replace("</body>", '<object data="https://attacker.example/"></object></body>'),
                 "embed": genuine.replace("</body>", '<EMBED src="https://attacker.example/"></body>'),
+                "frame": genuine.replace("</body>", '<frame src="https://attacker.example/"></body>'),
+                "frameset": genuine.replace("</body>", "<FRAMESET></FRAMESET></body>"),
             }
             with mock.patch.object(render_session.webbrowser, "open") as opened:
                 for name, html_text in forged.items():
