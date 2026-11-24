@@ -201,7 +201,8 @@ claude-code-session-viewer/
 │   └── images/                          # この README で使っている画像
 ├── .github/
 │   ├── workflows/                       # テストを実行する（GitHub Actions）
-│   └── dependabot.yml                   # actions を最新に保つ
+│   ├── dependabot.yml                   # actions を最新に保つ
+│   └── CODEOWNERS                       # すべての PR にオーナーの承認を求める
 ├── LICENSE
 ├── README.md
 ├── README.ja.md
