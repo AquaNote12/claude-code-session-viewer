@@ -355,7 +355,7 @@ class SecurityTest(ResetLangMixin, unittest.TestCase):
             assistant_rec([{"type": "thinking", "thinking": "MARK_THINKING_GONE"},
                            {"type": "tool_use", "id": "t1", "name": "Bash", "input": {"command": "MARK_TOOL_GONE"}},
                            {"type": "text", "text": "MARK_CLAUDE_REPLY"}]),
-            user_rec("<command-name>/MARK_COMMAND</command-name><command-args>MARK_ARGS</command-args>"),
+            user_rec("<command-name>/MARK_SLASH</command-name><command-args>MARK_ARGS</command-args>"),
             user_rec("<local-command-stdout>MARK_COMMAND_OUTPUT</local-command-stdout>"),
             user_rec("<task-notification><task-id>x</task-id><status>completed</status>"
                      "<result>MARK_TASK_RESULT</result></task-notification>"),
@@ -377,7 +377,7 @@ class SecurityTest(ResetLangMixin, unittest.TestCase):
         kept = ["MARK_TITLE", "/tmp/MARK_CWD", "MARK_BRANCH", "abcd0000-0000",   # session details
                 "MARK_USER_MESSAGE", 'src="data:image/png;base64,', "MARK_CLAUDE_REPLY",  # the conversation
                 "MARK_COMMAND_OUTPUT", "MARK_TASK_RESULT", "MARK_HOOK", "MARK_SKILL_BODY", "MARK_SEL.py",
-                "MARK_COMPACT_SUMMARY", "MARK_COMMAND", "MARK_ARGS", "MARK_EDITED.py", "MARK_ATTACHED.md",
+                "MARK_COMPACT_SUMMARY", "MARK_SLASH", "MARK_ARGS", "MARK_EDITED.py", "MARK_ATTACHED.md",
                 "MARK_PLAN.md", "MARK_API_ERROR", "MARK_PR"]
         for marker in kept:
             with self.subTest(kept=marker):
