@@ -42,7 +42,7 @@ The page is a single file. It loads nothing from the network: no external script
 
 ### Supported platforms
 
-This skill is developed and tested on **macOS only**. Linux and Windows have not been tested. Known gaps:
+This skill is developed and tested on **macOS only**. The unit tests also run on Linux in CI, but the skill itself has not been tried on Linux or Windows. Known gaps:
 
 - On Windows, the `python3` command may not exist (only `python` or `py`), and printing Japanese file names may fail with Python versions older than 3.15.
 - Detecting the language from the OS works on macOS and Linux, but usually falls back to English on Windows.
@@ -213,7 +213,12 @@ Run the tests from the repository root:
 python3 -m unittest discover -s tests
 ```
 
-GitHub Actions runs them for every pull request and push to `main`: on Linux with Python 3.9 and the latest Python 3 (`.github/workflows/test.yml`, the required checks), and on macOS with the system Python 3.9 (`.github/workflows/test-macos.yml`, for reference only, because macOS runners are sometimes unavailable for a long time).
+GitHub Actions runs them on Linux with Python 3.9 and the latest Python 3 for every pull request and push to `main` (`.github/workflows/test.yml`). These are the required checks for merging.
+
+The CI does not run on macOS, and one test needs macOS's case-insensitive file system (it is reported as skipped on Linux). Before merging a pull request from someone else, and before each release, check on a Mac:
+
+1. Run the tests with the system Python: `/usr/bin/python3 -B -m unittest discover -s tests`. No test should be skipped.
+2. Export a real session with the skill (`render`, then `open`) and look at the page in the browser.
 
 To report a security problem, see [SECURITY.md](SECURITY.md).
 

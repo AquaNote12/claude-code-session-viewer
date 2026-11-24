@@ -1,8 +1,9 @@
 name: Tests
 
 # The required checks. They run on Linux, where runners are always available; the code uses only the
-# standard library, and the few macOS-specific paths are simulated in the tests. The run with macOS's own
-# Python is in test-macos.yml.
+# standard library, and the few macOS-specific paths are simulated in the tests. A test that needs macOS's
+# case-insensitive file system is reported as skipped here, so the tests are also run by hand on a Mac before
+# each release (README: Development). A macOS job was tried, but its runners were often unavailable for a long time.
 
 on:
   push:
@@ -14,12 +15,17 @@ permissions:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  # Cancel an older run only on pull requests; every commit on main keeps its own result.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   test:
+    # The resulting names, "Python 3.9" and "Python 3 (latest)", are the required status checks of the ruleset on
+    # main. If you change them, change the ruleset as well, or every pull request waits for the old names forever.
     name: Python ${{ matrix.name }}
     # Not ubuntu-latest: actions/setup-python has no Python 3.9 build for Ubuntu 26.04 (3.9 is end of life).
+    # When ubuntu-24.04 is retired or the 3.9 builds disappear, either run the 3.9 job in a python:3.9 container,
+    # or raise the minimum Python version (README, this matrix and the ruleset's required checks together).
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     strategy:
