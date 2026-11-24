@@ -8,7 +8,7 @@ from .util import esc
 # ({1,500}) so that an opening marker without a closing one cannot make the search rescan the whole line.
 INLINE_CODE_RE = re.compile(r"`([^`\n]{1,2000})`")
 LINK_RE = re.compile(r"\[([^\[\]\n]{1,500})\]\((https?://[^)\s]{1,2000})\)")
-AUTOLINK_RE = re.compile(r"(?<![\"'=>])(https?://[^\s<>\"')\]]+)")
+AUTOLINK_RE = re.compile(r"(?<![\"'=>])(https?://[^\s<>\"')\]\ue000\ue001]+)")  # stops at fragment markers
 BOLD_RE = re.compile(r"\*\*(?=\S)([^\n]{1,500}?)(?<=\S)\*\*")
 STRIKE_RE = re.compile(r"~~(?=\S)([^\n]{1,500}?)(?<=\S)~~")
 LIST_RE = re.compile(r"^(\s*)([-*+]|\d+[.)])\s+(.*)$")
@@ -30,10 +30,17 @@ def md_inline(text):
 
     text = text.replace(SLOT_OPEN, "").replace(SLOT_CLOSE, "")
     text = INLINE_CODE_RE.sub(lambda m: keep("<code>%s</code>" % esc(m.group(1))), text)
-    text = LINK_RE.sub(
-        lambda m: keep('<a href="%s" target="_blank" rel="noopener noreferrer">%s</a>' % (esc(m.group(2)), esc(m.group(1)))),
-        text,
-    )
+    def restore(fragment):
+        return SLOT_RE.sub(lambda m: slots[int(m.group(1))], fragment)
+
+    def link(m):
+        label, url = m.group(1), m.group(2)
+        if SLOT_OPEN in url:
+            return m.group(0)  # the URL itself contains code: leave it as text
+        # The label may contain inline code that was already replaced by a fragment marker; put it back.
+        return keep('<a href="%s" target="_blank" rel="noopener noreferrer">%s</a>' % (esc(url), restore(esc(label))))
+
+    text = LINK_RE.sub(link, text)
     text = AUTOLINK_RE.sub(
         lambda m: keep('<a href="%s" target="_blank" rel="noopener noreferrer">%s</a>' % (esc(m.group(1)), esc(m.group(1)))),
         text,

@@ -14,6 +14,7 @@ MESSAGES = {
     "cli_no_subagents": "サブエージェントのやり取りを含めない",
     "cli_no_tools": ("ツール呼び出しとその結果を、その中のサブエージェントのやり取りも含めてページに入れない"
                      "（コマンドの出力、フックの出力、IDE の選択範囲、圧縮時の要約は残る）"),
+    "cli_force": "--out のファイルが、このツールで生成したページでなくても置き換える",
     "cli_no_thinking": "Claude の思考を、サブエージェントの分も含めてページに入れない",
     "cli_open": "生成した HTML ファイルを既定のブラウザで開く",
     "cli_open_path": "生成した HTML ファイルのパス",
@@ -27,6 +28,8 @@ MESSAGES = {
     "err_ambiguous": "ID が複数のセッションに一致しました。もっと長く指定してください:",
     "err_session_id": "セッション ID として扱えません: {arg}（英数字とハイフンで 4 文字以上、または .jsonl ファイルのパスを指定してください）",
     "err_write": "{path} に書き込めませんでした: {error}",
+    "err_out_exists": ("{path} は claude-code-session-viewer で生成したページではないため、上書きしません。"
+                       "別の --out を指定するか、置き換えてよければ --force を付けてください。"),
     "err_out_dir": "{path} を出力先のディレクトリとして使えません: {error}",
     "list_fallback": "（{dir} のセッションが無いため、全プロジェクトを表示します）",
     "untitled": "(タイトルなし)",

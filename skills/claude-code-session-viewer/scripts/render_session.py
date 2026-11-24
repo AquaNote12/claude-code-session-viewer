@@ -3,7 +3,7 @@
 
 Usage:
   render_session.py list [--all] [--limit N] [--project DIR] [--current-session SESSION] [--lang ja|en]
-  render_session.py render SESSION [--out PATH] [--no-subagents] [--no-tools] [--no-thinking] [--lang ja|en]
+  render_session.py render SESSION [--out PATH] [--force] [--no-subagents] [--no-tools] [--no-thinking] [--lang ja|en]
   render_session.py open PATH
 
 SESSION is a session ID (a unique prefix is enough) or a path to a JSONL file.
@@ -79,6 +79,30 @@ def output_path(out_arg, filename):
     return out if out.suffix.lower() == ".html" else out / filename
 
 
+def looks_generated(path):
+    """True if the existing file looks like a page this tool generated (any version), so it may be replaced."""
+    try:
+        data = path.read_bytes()
+    except OSError:
+        return False
+    if GENERATED_PAGE_MARKER in data:
+        return True
+    # Pages from versions before the data block existed still carry the tool's name in the footer.
+    return b'<div class="footer">' in data and b"claude-code-session-viewer" in data
+
+
+def check_overwrite(out, force):
+    """Refuse to replace an existing file that this tool did not generate, unless --force is given.
+
+    The skill may run the script without asking, so --out must not be usable to clobber, say, a project's
+    index.html. Symbolic links are refused later by write_page in any case.
+    """
+    if force or not out.is_file() or out.is_symlink():
+        return
+    if not looks_generated(out):
+        sys.exit(t("err_out_exists", path=out))
+
+
 def write_page(out, page):
     """Write the page readable by the owner only, without following a symbolic link at the destination."""
     try:
@@ -105,6 +129,7 @@ def cmd_render(args):
     items = filter_items(builder.build(), include_tools=not args.no_tools, include_thinking=not args.no_thinking)
     page, filename = render_page(builder, items)
     out = output_path(args.out, filename)
+    check_overwrite(out, args.force)
     write_page(out, page)
     n = sum(1 for it in items if it["kind"] in ("user", "assistant"))
     print(t("rendered", path=out))
@@ -156,6 +181,7 @@ def build_parser():
     rp.add_argument("--no-subagents", action="store_true", help=t("cli_no_subagents"))
     rp.add_argument("--no-tools", action="store_true", help=t("cli_no_tools"))
     rp.add_argument("--no-thinking", action="store_true", help=t("cli_no_thinking"))
+    rp.add_argument("--force", action="store_true", help=t("cli_force"))
     rp.add_argument("--lang", choices=SUPPORTED_LANGS, help=lang_help)
     op = sub.add_parser("open", help=t("cli_open"))
     op.add_argument("path", help=t("cli_open_path"))
