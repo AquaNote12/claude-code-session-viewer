@@ -173,7 +173,11 @@ body.hide-system .sys { display: none; }
   .msg > .avatar { display: none; }
   .topbar { flex-wrap: wrap; padding: 8px 16px; }
   .topbar h1 { font-size: 13px; flex: 1 1 calc(100% - 60px); }
-  .btn-group { flex: 1 1 100%; flex-wrap: nowrap; justify-content: flex-start; overflow-x: auto; padding-bottom: 2px; }
+  .btn-group { flex: 1 1 100%; flex-wrap: nowrap; justify-content: flex-start; overflow-x: auto; padding-bottom: 2px;
+    padding-right: 24px;  /* lets the last button scroll clear of the fade below */
+    -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 24px), transparent);
+    mask-image: linear-gradient(to right, #000 calc(100% - 24px), transparent); }  /* hints that the row scrolls */
+  #btn-copy, #btn-download { order: -1; }  /* keep the main actions in view on narrow screens */
   .toc { top: 0; height: 100vh; z-index: 30; }
   .facts dl { grid-template-columns: 1fr; }
   .btn .lbl { display: none; }

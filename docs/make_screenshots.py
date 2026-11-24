@@ -11,7 +11,6 @@ Chrome or Chromium binary.
 
 import json
 import os
-import shutil
 import subprocess
 import sys
 import tempfile
@@ -23,6 +22,7 @@ OUT_DIR = ROOT / "docs" / "images"
 CHROME = os.environ.get("CHROME", "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
 SESSION_ID = "5e551011-0000-4000-8000-00000000demo"
 
+sys.dont_write_bytecode = True  # importing ccsv must not leave __pycache__ folders in the skill
 sys.path.insert(0, str(SCRIPT.parent))
 from ccsv import i18n  # noqa: E402
 
@@ -207,8 +207,6 @@ def main():
             png = OUT_DIR / ("%s-phone-dark.png" % lang)
             chrome_screenshot(phone.as_uri(), png, 500, 1000)
             print("wrote", OUT_DIR / ("%s-desktop.png" % lang), "and", png)
-    shutil.rmtree(ROOT / "skills" / "claude-code-session-viewer" / "scripts" / "ccsv" / "__pycache__",
-                  ignore_errors=True)
 
 
 if __name__ == "__main__":
