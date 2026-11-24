@@ -87,6 +87,8 @@ def looks_generated(path):
         data = path.read_bytes()
     except OSError:
         return False
+    if b"{{DATA_JSON}}" in data:
+        return False  # the page template itself, not a generated page
     if GENERATED_PAGE_MARKER in data:
         return True
     # Pages from versions before the data block existed still carry the tool's name in the footer.
@@ -94,6 +96,18 @@ def looks_generated(path):
 
 
 SKILL_DIR = Path(__file__).resolve().parent.parent  # the installed skill: SKILL.md, scripts/, assets
+
+
+def inside_skill(directory):
+    """True if the directory is the skill directory or inside it. Compared by file identity, not by spelling,
+    so that a path written in another letter case or Unicode form (same directory on macOS) is caught too."""
+    for p in (directory, *directory.parents):
+        try:
+            if os.path.samefile(str(p), str(SKILL_DIR)):
+                return True
+        except OSError:
+            continue  # does not exist (yet)
+    return False
 
 
 def check_destination(out, force):
@@ -110,14 +124,14 @@ def check_destination(out, force):
         real_parent = out.parent.resolve()
     except (OSError, RuntimeError):
         real_parent = out.parent
-    if real_parent == SKILL_DIR or SKILL_DIR in real_parent.parents:
+    if inside_skill(real_parent):
         sys.exit(t("err_out_in_skill", path=out))
     if out.is_symlink():
-        sys.exit(t("err_write", path=out, error="symbolic link"))
+        sys.exit(t("err_write", path=out, error=t("reason_symlink")))
     if not out.exists():
         return
     if not out.is_file():
-        sys.exit(t("err_write", path=out, error="not a regular file"))
+        sys.exit(t("err_write", path=out, error=t("reason_not_file")))
     if not force and out.stat().st_size > 0 and not looks_generated(out):
         # An empty file is allowed: it is what an interrupted write of an older version could leave behind.
         sys.exit(t("err_out_exists", path=out))
@@ -136,15 +150,18 @@ def write_page(out, page):
     except OSError as e:
         sys.exit(t("err_write", path=out, error=e.strerror or e))
     try:
-        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as f:
+        # errors="replace": a lone surrogate (possible in JSON escapes of a transcript) must not stop the export.
+        with os.fdopen(fd, "w", encoding="utf-8", errors="replace", newline="\n") as f:
             f.write(page)
         os.replace(tmp, str(out))
-    except OSError as e:
+    except BaseException as e:  # also Ctrl-C: never leave a partial copy of the transcript behind
         try:
             os.unlink(tmp)
         except OSError:
             pass
-        sys.exit(t("err_write", path=out, error=e.strerror or e))
+        if isinstance(e, OSError):
+            sys.exit(t("err_write", path=out, error=e.strerror or e))
+        raise
 
 
 def cmd_render(args):
@@ -164,7 +181,7 @@ def cmd_render(args):
     n = sum(1 for it in items if it["kind"] in ("user", "assistant"))
     print(t("rendered", path=out))
     print(t("source", path=path))
-    print(t("stats", n=n, kb=fmt_num(len(page.encode("utf-8")) // 1024)))
+    print(t("stats", n=n, kb=fmt_num(len(page.encode("utf-8", errors="replace")) // 1024)))
     print(t("privacy_notice"))
 
 

@@ -498,6 +498,50 @@ class OutputFileTest(ResetLangMixin, unittest.TestCase):
                         render_session.main(["render", str(FIXTURE), "--lang", "en", "--out", str(template)] + args)
             self.assertIn("{{DATA_JSON}}", template.read_text(encoding="utf-8"))
 
+    def test_skill_directory_is_compared_by_identity(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            skill = Path(tmp) / "skill"
+            (skill / "assets").mkdir(parents=True)
+            template = skill / "assets" / "page.html"
+            template.write_text('<script id="ccsv-data" type="application/json">{{DATA_JSON}}</script>',
+                                encoding="utf-8")
+            # The template is never taken for a generated page, even outside the skill (defence in depth).
+            self.assertFalse(render_session.looks_generated(template))
+            other_case = Path(tmp) / "SKILL" / "assets" / "page.html"
+            with mock.patch.object(render_session, "SKILL_DIR", skill.resolve()):
+                self.assertTrue(render_session.inside_skill(skill.resolve() / "assets" / "new"))
+                self.assertFalse(render_session.inside_skill(Path(tmp).resolve()))
+                if other_case.exists():  # a case-insensitive file system, as on macOS by default
+                    with self.assertRaises(SystemExit):
+                        self.run_render(str(other_case))
+            self.assertIn("{{DATA_JSON}}", template.read_text(encoding="utf-8"))
+
+    def test_interrupted_write_leaves_no_temp_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with mock.patch.object(render_session.os, "replace", side_effect=KeyboardInterrupt):
+                with self.assertRaises(KeyboardInterrupt):
+                    self.run_render(tmp + "/out/")
+            self.assertEqual(list((Path(tmp) / "out").iterdir()), [])
+
+    def test_lone_surrogate_does_not_stop_the_export(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            src = Path(tmp) / "00000000-0000-4000-8000-0000000000aa.jsonl"
+            src.write_text(json.dumps({"type": "user", "uuid": "u1", "timestamp": "2026-11-20T03:00:00Z",
+                                       "message": {"role": "user", "content": "bad \ud800 text"}}) + "\n",
+                           encoding="utf-8")
+            out = Path(tmp) / "out.html"
+            with contextlib.redirect_stdout(io.StringIO()):
+                render_session.main(["render", str(src), "--lang", "en", "--out", str(out)])
+            self.assertIn("bad ? text", out.read_text(encoding="utf-8"))
+            self.assertEqual([p.name for p in Path(tmp).iterdir() if p.name.startswith(".ccsv-")], [])
+
+    def test_refusal_does_not_suggest_force_to_claude(self):
+        for lang in ("en", "ja"):
+            i18n.set_lang(lang)
+            message = i18n.t("err_out_exists", path="x.html")
+            self.assertNotIn("pass --force", message)
+            self.assertNotIn("--force を付けてください", message)
+
     def test_damaged_template_is_an_error(self):
         with tempfile.TemporaryDirectory() as tmp:
             assets = Path(tmp) / "assets"
