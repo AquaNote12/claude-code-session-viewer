@@ -1,0 +1,52 @@
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Python ${{ matrix.name }}
+    # The skill supports macOS only (see README), so the tests run there.
+    runs-on: macos-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # The python3 that most users have: the Xcode Command Line Tools' Python 3.9.
+          - name: "3.9 (macOS system Python)"
+            python: system
+          - name: "3 (latest)"
+            python: "3.x"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - if: matrix.python != 'system'
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: Run the tests
+        env:
+          PYTHON_KIND: ${{ matrix.python }}
+        run: |
+          if [ "$PYTHON_KIND" = system ]; then
+            PY=/usr/bin/python3
+            # Fail loudly if the runner image ever stops shipping 3.9, instead of silently testing another version.
+            "$PY" -c 'import sys; assert sys.version_info[:2] == (3, 9), sys.version'
+          else
+            PY=python3
+          fi
+          "$PY" --version
+          "$PY" -B -m unittest discover -s tests -v

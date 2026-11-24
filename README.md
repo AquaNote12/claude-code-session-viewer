@@ -197,9 +197,11 @@ claude-code-session-viewer/
 ├── docs/
 │   ├── make_screenshots.py              # regenerates docs/images/ from a made-up demo session
 │   └── images/                          # screenshots used in this README
+├── .github/workflows/test.yml           # runs the tests (GitHub Actions)
 ├── LICENSE
 ├── README.md
 ├── README.ja.md
+├── SECURITY.md
 └── .gitignore
 ```
 
@@ -210,6 +212,10 @@ Run the tests from the repository root:
 ```bash
 python3 -m unittest discover -s tests
 ```
+
+GitHub Actions (`.github/workflows/test.yml`) runs them on macOS for every pull request and push to `main`, with the system Python 3.9 and the latest Python 3.
+
+To report a security problem, see [SECURITY.md](SECURITY.md).
 
 Where to make a change (paths from the repository root):
 
