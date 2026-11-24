@@ -21,8 +21,8 @@ MESSAGES = {
     "cli_out": "output .html file, or a directory to write into (default: {path})",  # {path}: default output directory
     "cli_no_subagents": "do not include subagent conversations",
     "cli_no_tools": ("leave tool calls and their results out of the page, including the subagent conversations "
-                     "inside them (the conversation, command output, background task results, hook output, loaded skills, "
-                     "IDE selections and compaction summaries are kept)"),
+                     "inside them. Not everything is removed: the session details, the conversation, command output, "
+                     "background task results and other system rows are kept, for example (see the README)"),
     "cli_no_thinking": "leave Claude's thinking out of the page, including that of subagents",
     "cli_open": "open a generated HTML file in the default browser",
     "cli_open_path": "path to the generated HTML file",
