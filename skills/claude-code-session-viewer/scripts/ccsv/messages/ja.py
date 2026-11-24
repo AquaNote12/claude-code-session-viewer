@@ -12,11 +12,13 @@ MESSAGES = {
     "cli_session": "セッション ID（先頭一致可）または JSONL ファイルのパス",
     "cli_out": "出力先の .html ファイル、または書き出すディレクトリ（既定: {path}）",
     "cli_no_subagents": "サブエージェントのやり取りを含めない",
-    "cli_no_tools": "ツール呼び出しとその結果をページに含めない（サブエージェントのやり取りも含まれなくなる）",
-    "cli_no_thinking": "Claude の思考をページに含めない",
+    "cli_no_tools": ("ツール呼び出しとその結果を、その中のサブエージェントのやり取りも含めてページに入れない"
+                     "（コマンドの出力、フックの出力、IDE の選択範囲、圧縮時の要約は残る）"),
+    "cli_no_thinking": "Claude の思考を、サブエージェントの分も含めてページに入れない",
     "cli_open": "生成した HTML ファイルを既定のブラウザで開く",
     "cli_open_path": "生成した HTML ファイルのパス",
     "err_open": "HTML ファイルが見つかりません: {path}",
+    "err_open_not_generated": "claude-code-session-viewer で生成したページではありません: {path}",
     "opened": "開きました: {path}",
     "privacy_notice": ("注意: ページには、ツールの実行結果、ファイルの中身、思考が含まれます（ページのボタンで隠せる項目も含みます）。"
                        "共有する前に機密情報が含まれていないか確認し、公開しないでください。"),

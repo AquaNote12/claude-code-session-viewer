@@ -68,15 +68,23 @@ def safe_filename_part(text, limit):
 
 
 def filter_items(items, include_tools=True, include_thinking=True):
-    """Leave tool calls and/or thinking out of the page. Bubbles left with nothing to show are dropped."""
+    """Leave tool calls and/or thinking out of the page. Bubbles left with nothing to show are dropped.
+
+    Applies to subagent conversations nested inside tool calls as well, so that e.g. --no-thinking also
+    removes the thinking of subagents.
+    """
     if include_tools and include_thinking:
         return items
     out = []
     for it in items:
         if it["kind"] == "assistant":
-            parts = [p for p in it["parts"]
-                     if not (p["type"] == "tool" and not include_tools)
-                     and not (p["type"] == "thinking" and not include_thinking)]
+            parts = []
+            for p in it["parts"]:
+                if (p["type"] == "tool" and not include_tools) or (p["type"] == "thinking" and not include_thinking):
+                    continue
+                if p["type"] == "tool" and p.get("sub_items") is not None:
+                    p = dict(p, sub_items=filter_items(p["sub_items"], include_tools, include_thinking))
+                parts.append(p)
             if not parts:
                 continue
             it = dict(it, parts=parts)

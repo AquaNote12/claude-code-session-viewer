@@ -113,12 +113,27 @@ def cmd_render(args):
     print(t("privacy_notice"))
 
 
+GENERATED_PAGE_MARKER = b'<script id="ccsv-data" type="application/json">'
+
+
 def cmd_open(args):
     # The browser is started by Python, not by a shell command, so nothing in the path is interpreted.
+    # The skill may run this without asking, so it only opens pages this tool generated: the real file
+    # (after following symbolic links) must be an .html file that carries the page's data block.
     path = Path(args.path).expanduser()
-    if path.suffix.lower() != ".html" or not path.is_file():
+    try:
+        real = path.resolve(strict=True)
+    except (OSError, RuntimeError):
         sys.exit(t("err_open", path=args.path))
-    webbrowser.open(path.resolve().as_uri())
+    if real.suffix.lower() != ".html" or not real.is_file():
+        sys.exit(t("err_open", path=args.path))
+    try:
+        generated = GENERATED_PAGE_MARKER in real.read_bytes()
+    except OSError:
+        generated = False
+    if not generated:
+        sys.exit(t("err_open_not_generated", path=args.path))
+    webbrowser.open(real.as_uri())
     print(t("opened", path=path))
 
 

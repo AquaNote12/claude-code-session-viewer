@@ -65,7 +65,7 @@ def peek_session(path):
     title = custom = first = None
     cwd = None
     try:
-        with open(path, encoding="utf-8") as f:
+        with open(path, encoding="utf-8", errors="replace") as f:
             for line in f:
                 if '"custom-title"' not in line and '"ai-title"' not in line and (first and cwd):
                     continue
@@ -76,19 +76,19 @@ def peek_session(path):
                 if not isinstance(d, dict):
                     continue
                 kind = d.get("type")
-                if kind == "custom-title":
-                    custom = d.get("customTitle")
-                elif kind == "ai-title":
-                    title = d.get("aiTitle")
-                if cwd is None and d.get("cwd"):
+                if kind == "custom-title" and isinstance(d.get("customTitle"), str):
+                    custom = d["customTitle"]
+                elif kind == "ai-title" and isinstance(d.get("aiTitle"), str):
+                    title = d["aiTitle"]
+                if cwd is None and isinstance(d.get("cwd"), str) and d["cwd"]:
                     cwd = d["cwd"]
                 if first is None and kind == "user" and not d.get("isMeta") and not d.get("isCompactSummary"):
                     texts = user_texts(d)
                     text = clean_prompt_text(" ".join(texts))[0]
                     if text.strip():
                         first = text
-    except OSError:
-        pass
+    except (OSError, ValueError, TypeError):
+        pass  # one unreadable file must not stop the whole list
     return custom or title, first, cwd
 
 
@@ -102,11 +102,12 @@ def user_texts(rec):
     if isinstance(c, str):
         return [c]
     if isinstance(c, list):
-        return [b.get("text", "") for b in c if isinstance(b, dict) and b.get("type") == "text"]
+        return [b["text"] for b in c if isinstance(b, dict) and b.get("type") == "text" and isinstance(b.get("text"), str)]
     return []
 
 
 PROMPT_TAG_OPEN_RE = re.compile(r"<(ide_opened_file|ide_selection|system-reminder)>")
+IDE_TAG_SCAN_CHARS = 2000
 
 
 def clean_prompt_text(text):
@@ -132,10 +133,12 @@ def clean_prompt_text(text):
         body = text[m.end():close].strip()
         pos = close + len(tag) + 3
         if tag == "ide_opened_file":
-            fm = re.search(r"opened the file (.+?) in the IDE", body)
+            # The patterns below only look at the start of the body: on a huge body full of repeated
+            # phrases, a lazy (.+?) would take quadratic time.
+            fm = re.search(r"opened the file (.+?) in the IDE", body[:IDE_TAG_SCAN_CHARS])
             notes.append((t("ide_opened_file"), fm.group(1) if fm else body, False))
         elif tag == "ide_selection":
-            fm = re.search(r"selected the lines (\d+) to (\d+) from (.+?):", body)
+            fm = re.search(r"selected the lines (\d+) to (\d+) from (.+?):", body[:IDE_TAG_SCAN_CHARS])
             if fm:
                 label = t("ide_selection_range", file=fm.group(3), start=fm.group(1), end=fm.group(2))
             else:
@@ -341,12 +344,13 @@ class Builder:
     def _collect_meta(self, rec):
         m = self.meta
         kind = rec.get("type")
-        if kind == "ai-title" and rec.get("aiTitle"):
+        # Only strings are taken: anything else in these fields would break file names and output.
+        if kind == "ai-title" and isinstance(rec.get("aiTitle"), str) and rec["aiTitle"]:
             m["title"] = rec["aiTitle"]
-        elif kind == "custom-title" and rec.get("customTitle"):
+        elif kind == "custom-title" and isinstance(rec.get("customTitle"), str) and rec["customTitle"]:
             m["custom_title"] = rec["customTitle"]
         for key, field in (("cwd", "cwd"), ("branch", "gitBranch"), ("version", "version")):
-            if rec.get(field):
+            if isinstance(rec.get(field), str) and rec[field]:
                 m[key] = rec[field]
         if kind in ("user", "assistant"):
             ts = parse_ts(rec.get("timestamp"))
