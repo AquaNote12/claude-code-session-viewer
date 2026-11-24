@@ -199,7 +199,9 @@ claude-code-session-viewer/
 ├── docs/
 │   ├── make_screenshots.py              # 架空のデモセッションから docs/images/ を作り直す
 │   └── images/                          # この README で使っている画像
-├── .github/workflows/                   # テストを実行する（GitHub Actions）
+├── .github/
+│   ├── workflows/                       # テストを実行する（GitHub Actions）
+│   └── dependabot.yml                   # actions を最新に保つ
 ├── LICENSE
 ├── README.md
 ├── README.ja.md

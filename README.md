@@ -197,7 +197,9 @@ claude-code-session-viewer/
 ├── docs/
 │   ├── make_screenshots.py              # regenerates docs/images/ from a made-up demo session
 │   └── images/                          # screenshots used in this README
-├── .github/workflows/                   # runs the tests (GitHub Actions)
+├── .github/
+│   ├── workflows/                       # runs the tests (GitHub Actions)
+│   └── dependabot.yml                   # keeps the actions up to date
 ├── LICENSE
 ├── README.md
 ├── README.ja.md
