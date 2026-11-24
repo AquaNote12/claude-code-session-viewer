@@ -175,6 +175,7 @@ body.hide-system .sys { display: none; }
   .topbar h1 { font-size: 13px; flex: 1 1 calc(100% - 60px); }
   .btn-group { flex: 1 1 100%; flex-wrap: nowrap; justify-content: flex-start; overflow-x: auto; padding-bottom: 2px;
     padding-right: 24px;  /* lets the last button scroll clear of the fade below */
+    scroll-padding-right: 24px;  /* a button focused with the keyboard also stops clear of the fade */
     -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 24px), transparent);
     mask-image: linear-gradient(to right, #000 calc(100% - 24px), transparent); }  /* hints that the row scrolls */
   #btn-copy, #btn-download { order: -1; }  /* keep the main actions in view on narrow screens */
