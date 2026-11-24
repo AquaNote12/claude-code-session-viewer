@@ -102,6 +102,7 @@ claude-code-session-viewer/
 │   └── claude-code-session-viewer/      # skill 本体（この単位でインストールされる）
 │       ├── SKILL.md
 │       └── scripts/render_session.py
+├── LICENSE
 ├── README.md
 └── .gitignore
 ```
@@ -132,3 +133,7 @@ claude-code-session-viewer/
 - ツール結果は 1 件あたり 30,000 文字で切り詰める。画像は HTML に埋め込むので、画像の多いセッションはファイルが大きくなる。
 - HTML にはツールの実行結果やファイルの中身もそのまま入る。共有する前に機密情報が含まれていないか確認すること。
 - `file://` で開いたページではブラウザによってクリップボード API が使えない。その場合は `document.execCommand("copy")` で代わりにコピーする。
+
+## ライセンス
+
+[MIT License](LICENSE)

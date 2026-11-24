@@ -3,6 +3,7 @@ name: claude-code-session-viewer
 description: Claude Code のセッション履歴を、メッセージアプリ風の吹き出し表示で 1 ファイルの HTML に書き出す。目次サイドバー、長文の折り畳み、モデルと effort の表示、ワンクリックでのダウンロードとコピーに対応する。「このセッションを HTML にして」「セッション履歴を出力して」「会話ログを共有用に書き出して」のように、Claude Code のセッションや会話履歴（transcript）を HTML で見たい・残したい・共有したいと言われたときに使う。
 argument-hint: "[セッションID | current | list]"
 allowed-tools: Bash(python3 *)
+license: MIT
 ---
 
 # Claude Code セッションを HTML に書き出す
