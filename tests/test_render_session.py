@@ -342,6 +342,25 @@ class SecurityTest(ResetLangMixin, unittest.TestCase):
                 render_session.main(["render", str(FIXTURE), "--lang", "en", "--out", tmp])
         self.assertIn("do not publish it", out.getvalue())
 
+    def test_documented_items_stay_with_no_tools_and_no_thinking(self):
+        # README ("Privacy and sharing") and --help list what these options do NOT remove; keep them true.
+        builder = transcript.Builder(FIXTURE)
+        i18n.set_lang("en")
+        page, _ = render.render_page(builder, render.filter_items(builder.build(), include_tools=False,
+                                                                  include_thinking=False))
+        for kept in (
+            "Please <strong>list</strong> the files",            # the conversation: user message
+            "Done. The fix is in",                                # the conversation: Claude's reply
+            "All good.",                                          # background task result
+            "Loaded skill: example-skill",                        # contents of a loaded skill
+            "File open in the IDE",                               # IDE context
+            "Summary: the user asked to fix app.py.",             # compaction summary
+            "Command: /compact",                                  # other system rows
+            "https://github.com/example/example/pull/1",
+        ):
+            with self.subTest(kept=kept):
+                self.assertIn(kept, page)
+
     def test_tools_and_thinking_can_be_left_out(self):
         _, full = render_fixture("en")
         builder = transcript.Builder(FIXTURE)
