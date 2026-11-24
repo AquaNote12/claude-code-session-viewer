@@ -87,8 +87,10 @@ def looks_generated(path):
         data = path.read_bytes()
     except OSError:
         return False
-    if b"{{DATA_JSON}}" in data:
-        return False  # the page template itself, not a generated page
+    if GENERATED_PAGE_MARKER + b"{{DATA_JSON}}" in data:
+        # The page template itself. Only this exact sequence: a generated page may contain "{{DATA_JSON}}" in
+        # its text (a session that talked about it), but there the marker is followed by JSON.
+        return False
     if GENERATED_PAGE_MARKER in data:
         return True
     # Pages from versions before the data block existed still carry the tool's name in the footer.

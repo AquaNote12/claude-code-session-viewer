@@ -516,6 +516,17 @@ class OutputFileTest(ResetLangMixin, unittest.TestCase):
                         self.run_render(str(other_case))
             self.assertIn("{{DATA_JSON}}", template.read_text(encoding="utf-8"))
 
+    def test_session_mentioning_the_template_placeholder_can_be_exported_again(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            src = Path(tmp) / "00000000-0000-4000-8000-0000000000ab.jsonl"
+            src.write_text(json.dumps(user_rec("please fix the {{DATA_JSON}} placeholder in page.html")) + "\n",
+                           encoding="utf-8")
+            out = Path(tmp) / "out.html"
+            for _ in range(2):
+                with contextlib.redirect_stdout(io.StringIO()):
+                    render_session.main(["render", str(src), "--lang", "en", "--out", str(out)])
+            self.assertIn("{{DATA_JSON}}", out.read_text(encoding="utf-8"))
+
     def test_interrupted_write_leaves_no_temp_file(self):
         with tempfile.TemporaryDirectory() as tmp:
             with mock.patch.object(render_session.os, "replace", side_effect=KeyboardInterrupt):
