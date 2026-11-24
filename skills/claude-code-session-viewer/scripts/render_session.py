@@ -25,11 +25,12 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from ccsv.i18n import SUPPORTED_LANGS, detect_lang, set_lang, t  # noqa: E402
-from ccsv.render import TemplateError, filter_items, render_page  # noqa: E402
+from ccsv.render import filter_items, render_page  # noqa: E402
 from ccsv.transcript import (  # noqa: E402
     Builder, SessionLookupError, all_session_files, peek_session, project_dir_name, resolve_session,
 )
 from ccsv.util import clean_line, fmt_num  # noqa: E402
+from ccsv.render import TemplateError  # noqa: E402  (own line: keeps merges with other branches clean)
 
 DEFAULT_OUT_DIR = Path.home() / "Downloads" / "claude-code-sessions"
 
