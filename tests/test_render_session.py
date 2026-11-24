@@ -11,6 +11,7 @@ import io
 import json
 import os
 import re
+import shutil
 import string
 import subprocess
 import sys
@@ -79,6 +80,13 @@ class MessagesTest(ResetLangMixin, unittest.TestCase):
                         self.assertLessEqual(placeholders(template), placeholders(table[key[: -len("_one")]]))
                     else:
                         self.assertEqual(placeholders(template), placeholders(reference[key]))
+
+    def test_no_placeholder_named_key(self):
+        # t(key, **kw) takes the message key as its first argument, so "{key}" in a message cannot be filled.
+        for lang, table in MESSAGES.items():
+            for key, template in table.items():
+                with self.subTest(lang=lang, key=key):
+                    self.assertNotIn("key", placeholders(template))
 
     def test_plural_selection(self):
         i18n.set_lang("en")
@@ -313,8 +321,8 @@ class SecurityTest(ResetLangMixin, unittest.TestCase):
         for src in ("[x](https://e.com/`y`)", "https://example.com/a`b`", "[`a` `b`](https://e.com) `c`"):
             with self.subTest(src=src):
                 out = md_inline(src)
-                self.assertNotIn("", out)
-                self.assertNotIn("", out)
+                self.assertNotIn("\ue000", out)
+                self.assertNotIn("\ue001", out)
                 self.assertNotRegex(out, r'href="[^"]*<code>')
 
     def test_only_http_links_are_links(self):
@@ -475,6 +483,59 @@ class OutputFileTest(ResetLangMixin, unittest.TestCase):
                               encoding="utf-8")
             self.run_render(str(legacy))
             self.assertIn('id="ccsv-data"', legacy.read_text(encoding="utf-8"))
+
+    def test_never_writes_inside_the_skill(self):
+        # A stand-in skill directory, so that a bug could never touch the real template.
+        with tempfile.TemporaryDirectory() as tmp:
+            skill = Path(tmp) / "skill"
+            (skill / "scripts" / "ccsv" / "assets").mkdir(parents=True)
+            template = skill / "scripts" / "ccsv" / "assets" / "page.html"
+            template.write_text('<script id="ccsv-data" type="application/json">{{DATA_JSON}}</script>',
+                                encoding="utf-8")
+            with mock.patch.object(render_session, "SKILL_DIR", skill.resolve()):
+                for args in ([], ["--force"]):
+                    with self.subTest(args=args), self.assertRaises(SystemExit):
+                        render_session.main(["render", str(FIXTURE), "--lang", "en", "--out", str(template)] + args)
+            self.assertIn("{{DATA_JSON}}", template.read_text(encoding="utf-8"))
+
+    def test_damaged_template_is_an_error(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            assets = Path(tmp) / "assets"
+            shutil.copytree(render.ASSETS_DIR, assets)
+            page = assets / "page.html"
+            page.write_text(page.read_text(encoding="utf-8").replace("{{BODY}}", ""), encoding="utf-8")
+            with mock.patch.object(render, "ASSETS_DIR", assets), self.assertRaises(SystemExit) as cm:
+                render_session.main(["render", str(FIXTURE), "--lang", "en", "--out", tmp + "/out/"])
+            self.assertIn("{{BODY}}", str(cm.exception.code))
+            self.assertFalse((Path(tmp) / "out").exists() and any((Path(tmp) / "out").iterdir()))
+
+    def test_failed_write_keeps_the_old_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self.run_render(tmp + "/out/")
+            page = next((Path(tmp) / "out").glob("*.html"))
+            before = page.read_bytes()
+            with mock.patch.object(render_session.os, "replace", side_effect=OSError(28, "No space left on device")):
+                with self.assertRaises(SystemExit):
+                    self.run_render(str(page))
+            self.assertEqual(page.read_bytes(), before)
+            self.assertEqual([p.name for p in (Path(tmp) / "out").iterdir()], [page.name])  # no temp file left
+
+    def test_empty_file_and_non_regular_destinations(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            empty = Path(tmp) / "empty.html"
+            empty.touch()
+            self.run_render(str(empty))  # what an interrupted older write could leave behind: replaced
+            self.assertIn('id="ccsv-data"', empty.read_text(encoding="utf-8"))
+            if hasattr(os, "mkfifo"):
+                fifo = Path(tmp) / "fifo.html"
+                os.mkfifo(fifo)
+                with self.assertRaises(SystemExit):
+                    self.run_render(str(fifo))
+
+    def test_skill_never_passes_force(self):
+        skill_md = (ROOT / "skills" / "claude-code-session-viewer" / "SKILL.md").read_text(encoding="utf-8")
+        self.assertNotRegex(skill_md, r"render_session\.py\"[^\n`]*--force")
+        self.assertIn("Never pass `--force`", skill_md)
 
     def test_out_rules_and_permissions(self):
         with tempfile.TemporaryDirectory() as tmp:

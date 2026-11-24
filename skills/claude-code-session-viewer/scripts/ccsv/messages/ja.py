@@ -30,6 +30,8 @@ MESSAGES = {
     "err_write": "{path} に書き込めませんでした: {error}",
     "err_out_exists": ("{path} は claude-code-session-viewer で生成したページではないため、上書きしません。"
                        "別の --out を指定するか、置き換えてよければ --force を付けてください。"),
+    "err_out_in_skill": "{path} は skill 自体の中にあるため、書き出しません。別の --out を指定してください。",
+    "err_template": "skill のページのテンプレートが壊れています（{part} がありません）。skill を入れ直してください。",
     "err_out_dir": "{path} を出力先のディレクトリとして使えません: {error}",
     "list_fallback": "（{dir} のセッションが無いため、全プロジェクトを表示します）",
     "untitled": "(タイトルなし)",

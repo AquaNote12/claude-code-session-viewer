@@ -38,6 +38,10 @@ JS_MESSAGE_KEYS = ("show_full", "collapse", "toast_downloaded", "toast_copied", 
 PLACEHOLDER_RE = re.compile(r"\{\{(t:[a-z_]+|[A-Z_]+)\}\}")
 
 
+class TemplateError(Exception):
+    """The page template is damaged. The message is user-facing."""
+
+
 INLINE_SCRIPT_RE = re.compile(r"<script>(.*?)</script>", re.S)
 
 
@@ -441,6 +445,11 @@ def render_page(builder, items):
         if key.startswith("t:"):
             return esc(t(key[2:]))
         return values.get(key, mo.group(0))
+
+    # A damaged template (e.g. overwritten with a generated page) would silently produce the wrong page.
+    for key in values:
+        if "{{%s}}" % key not in template:
+            raise TemplateError(t("err_template", part="{{%s}}" % key))
 
     # Replace everything in one pass, so "{{...}}" inside the transcript is never substituted.
     page = PLACEHOLDER_RE.sub(fill, template)

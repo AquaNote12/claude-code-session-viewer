@@ -30,6 +30,7 @@ def md_inline(text):
 
     text = text.replace(SLOT_OPEN, "").replace(SLOT_CLOSE, "")
     text = INLINE_CODE_RE.sub(lambda m: keep("<code>%s</code>" % esc(m.group(1))), text)
+
     def restore(fragment):
         return SLOT_RE.sub(lambda m: slots[int(m.group(1))], fragment)
 
@@ -48,7 +49,7 @@ def md_inline(text):
     text = esc(text)
     text = BOLD_RE.sub(r"<strong>\1</strong>", text)
     text = STRIKE_RE.sub(r"<del>\1</del>", text)
-    return SLOT_RE.sub(lambda m: slots[int(m.group(1))], text)
+    return restore(text)
 
 
 def is_table_sep(line):
